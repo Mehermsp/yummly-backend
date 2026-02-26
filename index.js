@@ -809,16 +809,6 @@ async function start() {
         } else {
             console.log("✅ Gmail App Password configured");
         }
-        const missing = requiredEnv.filter((k) => !process.env[k]);
-        if (missing.length) {
-            console.warn(
-                "⚠️ Missing environment variables for Gmail OAuth:",
-                missing.join(", "),
-                "\nEmails using Gmail API will fail until these are set."
-            );
-        } else {
-            console.log("✅ All Gmail OAuth variables set");
-        }
 
         await initDb();
         app.listen(PORT, () => console.log("✅ Server started on port", PORT));
