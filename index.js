@@ -162,16 +162,47 @@ app.post("/auth/send-registration-otp", async (req, res) => {
             [emailLower, otp, "registration", expires]
         );
 
-        await sendEmail(
-            emailLower,
-            "Yummly Registration OTP",
-            `
-    <h2>Welcome to Yummly 🍽️</h2>
-    <p>Your registration OTP is:</p>
-    <h1>${otp}</h1>
-    <p>This OTP expires in 5 minutes.</p>
+       await sendEmail(
+           emailLower,
+           "Verify Your Yummly Account",
+           `
+  <div style="font-family: Arial, sans-serif; background:#f6f9fc; padding:30px;">
+    <div style="max-width:500px; margin:auto; background:white; padding:30px; border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.05);">
+      
+      <h2 style="color:#E53935; text-align:center;">🍽️ Yummly</h2>
+      
+      <p style="font-size:16px;">Hi there,</p>
+      
+      <p style="font-size:15px; color:#555;">
+        Thanks for signing up! Please use the OTP below to verify your account:
+      </p>
+
+      <div style="text-align:center; margin:30px 0;">
+        <span style="display:inline-block; font-size:32px; letter-spacing:6px; 
+        font-weight:bold; color:#E53935; background:#fff3f3; padding:15px 25px; 
+        border-radius:8px;">
+          ${otp}
+        </span>
+      </div>
+
+      <p style="color:#777; font-size:14px;">
+        This OTP will expire in 5 minutes.
+      </p>
+
+      <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
+
+      <p style="font-size:13px; color:#999;">
+        If you didn’t request this, you can safely ignore this email.
+      </p>
+
+      <p style="font-size:12px; color:#bbb; text-align:center;">
+        © ${new Date().getFullYear()} Yummly. All rights reserved.
+      </p>
+
+    </div>
+  </div>
   `
-        );
+       );
 
         res.json({ ok: true, message: "OTP sent successfully" });
     } catch (err) {
@@ -281,12 +312,43 @@ app.post("/auth/forgot-password", async (req, res) => {
 
         await sendEmail(
             emailLower,
-            "Yummly Password Reset OTP",
+            "Reset Your Yummly Password",
             `
-    <h2>Password Reset 🔐</h2>
-    <p>Your OTP is:</p>
-    <h1>${otp}</h1>
-    <p>This OTP expires in 5 minutes.</p>
+  <div style="font-family: Arial, sans-serif; background:#f6f9fc; padding:30px;">
+    <div style="max-width:500px; margin:auto; background:white; padding:30px; border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.05);">
+
+      <h2 style="color:#4CAF50; text-align:center;">🔐 Password Reset</h2>
+
+      <p style="font-size:16px;">We received a request to reset your password.</p>
+
+      <p style="font-size:15px; color:#555;">
+        Use the OTP below to continue:
+      </p>
+
+      <div style="text-align:center; margin:30px 0;">
+        <span style="display:inline-block; font-size:32px; letter-spacing:6px; 
+        font-weight:bold; color:#4CAF50; background:#e8f5e9; padding:15px 25px; 
+        border-radius:8px;">
+          ${otp}
+        </span>
+      </div>
+
+      <p style="color:#777; font-size:14px;">
+        This OTP expires in 5 minutes.
+      </p>
+
+      <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
+
+      <p style="font-size:13px; color:#999;">
+        If you didn’t request this reset, please ignore this email.
+      </p>
+
+      <p style="font-size:12px; color:#bbb; text-align:center;">
+        © ${new Date().getFullYear()} Yummly
+      </p>
+
+    </div>
+  </div>
   `
         );
 
@@ -458,63 +520,60 @@ app.post("/orders", async (req, res) => {
             )
             .join("");
 
-        const receiptHtml = `
-<h2>🍽️ Yummly Order Receipt</h2>
+const receiptHtml = `
+<div style="font-family: Arial, sans-serif; background:#f6f9fc; padding:30px;">
+  <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.05);">
 
-<p><strong>Order ID:</strong> ${orderId}</p>
-<p><strong>Transaction ID:</strong> ${paymentId || "COD"}</p>
-<p><strong>Payment Method:</strong> ${paymentMethod.toUpperCase()}</p>
+    <h2 style="color:#E53935; text-align:center;">🍽️ Yummly Order Receipt</h2>
 
-<hr/>
+    <p><strong>Order ID:</strong> #${orderId}</p>
+    <p><strong>Payment Method:</strong> ${paymentMethod.toUpperCase()}</p>
+    <p><strong>Total Paid:</strong> ₹${total}</p>
 
-<h3>👤 Customer Details</h3>
-<p><strong>Name:</strong> ${user.name}</p>
-<p><strong>Phone:</strong> ${phone || "Not provided"}</p>
-<h3>🏠 Delivery Address</h3>
-<p>
-<strong>Door No:</strong> ${doorNo || "-"} <br/>
-<strong>Street:</strong> ${street || "-"} <br/>
-<strong>Area:</strong> ${area || "-"} <br/>
-<strong>City:</strong> ${city || "-"} <br/>
-<strong>State:</strong> ${state || "-"} <br/>
-<strong>ZIP Code:</strong> ${zipCode || "-"}
-</p>
+    <hr style="margin:20px 0;" />
 
-<p><strong>Phone:</strong> ${phone || "Not provided"}</p>
+    <h3 style="margin-bottom:10px;">🛒 Ordered Items</h3>
 
-<hr/>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
+      <tr style="background:#f3f3f3;">
+        <th align="left">Item</th>
+        <th align="center">Qty</th>
+        <th align="right">Total</th>
+      </tr>
+      ${items
+          .map(
+              (it) => `
+        <tr>
+          <td>${it.name}</td>
+          <td align="center">${it.qty}</td>
+          <td align="right">₹${it.price * it.qty}</td>
+        </tr>
+      `
+          )
+          .join("")}
+    </table>
 
-<h3>📝 Delivery Instructions</h3>
-<p>${notes || "No special instructions provided."}</p>
+    <hr style="margin:20px 0;" />
 
-<hr/>
+    <h3>🏠 Delivery Address</h3>
+    <p style="color:#555;">
+      ${doorNo}, ${street}, ${area}<br/>
+      ${city}, ${state} - ${zipCode}
+    </p>
 
-<h3>🛵 Delivery Partner Instructions</h3>
-<ul>
-<li>Confirm customer phone before arrival</li>
-<li>Handle food carefully</li>
-<li>Mark delivered only after handover</li>
-<li>Follow safety protocols</li>
-</ul>
+    <hr style="margin:20px 0;" />
 
-<hr/>
+    <p style="text-align:center; color:#777;">
+      Thank you for ordering with Yummly ❤️<br/>
+      Your food is being prepared!
+    </p>
 
-<h3>🛒 Ordered Items</h3>
-<table border="1" cellpadding="6" cellspacing="0">
-<tr>
-<th>Item</th>
-<th>Qty</th>
-<th>Price</th>
-<th>Total</th>
-</tr>
-${itemRows}
-</table>
+    <p style="font-size:12px; color:#bbb; text-align:center;">
+      © ${new Date().getFullYear()} Yummly
+    </p>
 
-<h3>Total Paid: ₹${total}</h3>
-
-<br/>
-<p>Thank you for ordering with Yummly ❤️</p>
-<p>Your food is being prepared!</p>
+  </div>
+</div>
 `;
 
         // 🔥 SEND EMAIL
