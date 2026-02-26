@@ -3,16 +3,16 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcryptjs");
-
-const app = express();
-app.use(cors());
-app.use(bodyParser.json());
 const path = require("path");
-// Load from .env if it exists (local dev), otherwise use process.env (Render)
+
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const { Resend } = require("resend");
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
 // Configure via env variables or defaults
 const DB_HOST = process.env.DB_HOST;
 const DB_USER = process.env.DB_USER;
@@ -47,14 +47,8 @@ async function initDb() {
 
 // Email transporter (configure with your email service)
 // ✅ Simple Gmail App Password transporter
-await resend.emails.send({
-    from: "Yummly <onboarding@resend.dev>",
-    to: emailLower,
-    subject: "Yummly Password Reset OTP",
-    html: `<p>Your OTP is <strong>${otp}</strong></p>`,
-});
-// In-memory OTP store (in production, use Redis or database)
 
+// In-memory OTP store (in production, use Redis or database)
 
 // --- Health check ---
 app.get("/ping", (req, res) => {
@@ -97,10 +91,8 @@ app.get("/diagnostics", async (req, res) => {
         res.json({
             server: "running",
             timestamp: new Date().toISOString(),
-            transporter: {
-                initialized: transporter ? "yes" : "no",
-                emailUser: process.env.EMAIL_USER || "not set",
-            },
+            emailService: "Resend",
+            resendKey: process.env.RESEND_API_KEY ? "configured" : "missing",
             database: {
                 host: process.env.DB_HOST || "not set",
                 port: process.env.DB_PORT || "not set",
@@ -816,32 +808,10 @@ app.post("/user/:userId/profile", async (req, res) => {
 // --- Start server ---
 async function start() {
     try {
-        // Log database connection info (mask password)
-        console.log("🗄️  Database Config:");
-        console.log(`   Host: ${DB_HOST}`);
-        console.log(`   User: ${DB_USER}`);
-        console.log(`   Database: ${DB_NAME}`);
-
-        // Warn if Gmail environment variables are missing
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-            console.warn("⚠️ EMAIL_USER or EMAIL_PASS not set");
-        } else {
-            console.log("✅ Gmail App Password configured");
-        }
-
-        try {
-            await initDb();
-            app.listen(PORT, () =>
-                console.log("✅ Server started on port", PORT)
-            );
-        } catch (e) {
-            console.error("❌ Failed to start server", e.message);
-            process.exit(1);
-        }
+        await initDb();
         app.listen(PORT, () => console.log("✅ Server started on port", PORT));
     } catch (e) {
         console.error("❌ Failed to start server", e.message);
-        console.error("Full error:", e);
         process.exit(1);
     }
 }
@@ -983,8 +953,8 @@ app.put("/delivery/orders/:id/status", async (req, res) => {
             }
 
             if (status === "delivered") {
-                await transporter.sendMail({
-                    from: process.env.EMAIL_USER || "yummlydelivers@gmail.com",
+                await resend.emails.send({
+                    from: "Yummly <onboarding@resend.dev>",
                     to: order.email,
                     subject: `Your Order has been Delivered! ✅`,
                     html: `
