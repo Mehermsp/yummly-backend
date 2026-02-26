@@ -46,19 +46,20 @@ async function initDb() {
 
 // Email transporter (configure with your email service)
 // ✅ Simple Gmail App Password transporter
-let transporter = null;
-try {
-    transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
-        },
-    });
-    console.log("✅ Email transporter initialized");
-} catch (err) {
-    console.error("❌ Email transporter creation failed:", err.message);
-}
+let transporter;
+
+transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // true for 465
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+    tls: {
+        rejectUnauthorized: false,
+    },
+});
 // In-memory OTP store (in production, use Redis or database)
 
 
@@ -259,17 +260,34 @@ app.post("/auth/forgot-password", async (req, res) => {
             [emailLower, otp, "reset", users[0].id, expires]
         );
 
-        await transporter.sendMail({
+        const info = await transporter.sendMail({
             from: process.env.EMAIL_USER,
             to: emailLower,
             subject: "Yummly Password Reset OTP",
             text: `Your OTP is ${otp}`,
         });
+        console.log("EMAIL RESPONSE:", info.response);
 
         res.json({ ok: true, message: "OTP sent" });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to send OTP" });
+    }
+});
+//test mail
+app.get("/test-email", async (req, res) => {
+    try {
+        const info = await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: process.env.EMAIL_USER,
+            subject: "SMTP Test",
+            text: "If you receive this, SMTP works.",
+        });
+
+        res.json({ success: true, response: info.response });
+    } catch (err) {
+        console.error("SMTP TEST ERROR:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -807,6 +825,12 @@ async function start() {
         }
 
         await initDb();
+        try {
+            await transporter.verify();
+            console.log("✅ SMTP connection successful");
+        } catch (err) {
+            console.error("❌ SMTP verification failed:", err);
+        }
         app.listen(PORT, () => console.log("✅ Server started on port", PORT));
     } catch (e) {
         console.error("❌ Failed to start server", e.message);
