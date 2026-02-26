@@ -3,8 +3,6 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcryptjs");
-const { Resend } = require("resend");
-
 
 const app = express();
 app.use(cors());
