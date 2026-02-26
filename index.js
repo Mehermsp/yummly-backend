@@ -74,7 +74,13 @@ async function createTransporter() {
 const otpStore = new Map();
 
 // --- Health check ---
-app.get("/ping", (req, res) => res.json({ ok: true }));
+app.get("/ping", (req, res) => {
+    res.json({
+        ok: true,
+        ts: new Date().toISOString(),
+        version: process.env.COMMIT_HASH || "dev",
+    });
+});
 
 // --- Detailed health check (test database connection) ---
 app.get("/health", async (req, res) => {
