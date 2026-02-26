@@ -9,7 +9,9 @@ const { google } = require("googleapis");
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-require("dotenv").config();
+const path = require("path");
+// Load from .env if it exists (local dev), otherwise use process.env (Render)
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 // Configure via env variables or defaults
 const DB_HOST = process.env.DB_HOST;
@@ -757,6 +759,12 @@ app.post("/user/:userId/profile", async (req, res) => {
 // --- Start server ---
 async function start() {
     try {
+        // Log database connection info (mask password)
+        console.log("🗄️  Database Config:");
+        console.log(`   Host: ${DB_HOST}`);
+        console.log(`   User: ${DB_USER}`);
+        console.log(`   Database: ${DB_NAME}`);
+
         // Warn if Gmail OAuth environment variables are missing
         const requiredEnv = [
             "GOOGLE_CLIENT_ID",
@@ -771,11 +779,15 @@ async function start() {
                 missing.join(", "),
                 "\nEmails using Gmail API will fail until these are set."
             );
+        } else {
+            console.log("✅ All Gmail OAuth variables set");
         }
+
         await initDb();
         app.listen(PORT, () => console.log("✅ Server started on port", PORT));
     } catch (e) {
-        console.error("❌ Failed to start server", e);
+        console.error("❌ Failed to start server", e.message);
+        console.error("Full error:", e);
         process.exit(1);
     }
 }
