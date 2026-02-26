@@ -117,12 +117,22 @@ app.post("/auth/send-registration-otp", async (req, res) => {
         });
 
         // Send OTP email
-        await transporter.sendMail({
-            from: "yummlydelivers@gmail.com",
-            to: emailLower,
-            subject: "Yummly Registration OTP",
-            text: `Your OTP for registration is ${otp}. It will expire in 5 minutes.`,
-        });
+        try {
+            await transporter.sendMail({
+                from: process.env.EMAIL_USER || "yummlydelivers@gmail.com",
+                to: emailLower,
+                subject: "Yummly Registration OTP",
+                text: `Your OTP for registration is ${otp}. It will expire in 5 minutes.`,
+            });
+        } catch (mailErr) {
+            console.error("Registration OTP send failure:", mailErr.message);
+            return res
+                .status(500)
+                .json({
+                    error: "Failed to send OTP",
+                    details: mailErr.message,
+                });
+        }
 
         res.json({ ok: true, message: "OTP sent to your email" });
     } catch (err) {
@@ -244,7 +254,6 @@ app.post("/auth/forgot-password", async (req, res) => {
         });
 
         try {
-
             await transporter.sendMail({
                 from: process.env.EMAIL_USER,
                 to: emailLower,
@@ -927,7 +936,6 @@ app.put("/delivery/orders/:id/status", async (req, res) => {
         ============================== */
 
         try {
-
             if (status === "picked_up") {
                 await transporter.sendMail({
                     from: process.env.EMAIL_USER || "yummlydelivers@gmail.com",
