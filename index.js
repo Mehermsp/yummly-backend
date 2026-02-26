@@ -24,11 +24,13 @@ let pool;
 async function initDb() {
     const config = {
         host: DB_HOST,
+        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
         user: DB_USER,
         password: DB_PASS,
         database: DB_NAME,
         waitForConnections: true,
         connectionLimit: 10,
+        connectTimeout: 10000, // 10s
     };
 
     // enable SSL for Aiven/MySQL if required (Render -> Aiven over public Internet)
