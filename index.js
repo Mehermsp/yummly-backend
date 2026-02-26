@@ -3,7 +3,8 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
+
 
 const app = express();
 app.use(cors());
@@ -12,6 +13,8 @@ const path = require("path");
 // Load from .env if it exists (local dev), otherwise use process.env (Render)
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 // Configure via env variables or defaults
 const DB_HOST = process.env.DB_HOST;
 const DB_USER = process.env.DB_USER;
@@ -46,19 +49,11 @@ async function initDb() {
 
 // Email transporter (configure with your email service)
 // ✅ Simple Gmail App Password transporter
-let transporter;
-
-transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // true for 465
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-        rejectUnauthorized: false,
-    },
+await resend.emails.send({
+    from: "Yummly <onboarding@resend.dev>",
+    to: emailLower,
+    subject: "Yummly Password Reset OTP",
+    html: `<p>Your OTP is <strong>${otp}</strong></p>`,
 });
 // In-memory OTP store (in production, use Redis or database)
 
@@ -139,6 +134,7 @@ app.post("/auth/send-registration-otp", async (req, res) => {
             "SELECT id FROM users WHERE LOWER(email)=?",
             [emailLower]
         );
+
         if (exists.length)
             return res.status(400).json({ error: "Email already exists" });
 
@@ -150,16 +146,21 @@ app.post("/auth/send-registration-otp", async (req, res) => {
             [emailLower, otp, "registration", expires]
         );
 
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+        await resend.emails.send({
+            from: "Yummly <onboarding@resend.dev>",
             to: emailLower,
             subject: "Yummly Registration OTP",
-            text: `Your OTP is ${otp}`,
+            html: `
+                <h2>Welcome to Yummly 🍽️</h2>
+                <p>Your registration OTP is:</p>
+                <h1>${otp}</h1>
+                <p>This OTP expires in 5 minutes.</p>
+            `,
         });
 
-        res.json({ ok: true, message: "OTP sent" });
+        res.json({ ok: true, message: "OTP sent successfully" });
     } catch (err) {
-        console.error(err);
+        console.error("Registration OTP Error:", err);
         res.status(500).json({ error: "Failed to send OTP" });
     }
 });
@@ -243,12 +244,15 @@ app.post("/auth/login", async (req, res) => {
 app.post("/auth/forgot-password", async (req, res) => {
     try {
         const { email } = req.body;
+        if (!email) return res.status(400).json({ error: "Email required" });
+
         const emailLower = email.trim().toLowerCase();
 
         const [users] = await pool.query(
             "SELECT id FROM users WHERE LOWER(email)=?",
             [emailLower]
         );
+
         if (!users.length)
             return res.status(400).json({ error: "Account not found" });
 
@@ -260,33 +264,36 @@ app.post("/auth/forgot-password", async (req, res) => {
             [emailLower, otp, "reset", users[0].id, expires]
         );
 
-        const info = await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+        await resend.emails.send({
+            from: "Yummly <onboarding@resend.dev>",
             to: emailLower,
             subject: "Yummly Password Reset OTP",
-            text: `Your OTP is ${otp}`,
+            html: `
+                <h2>Password Reset 🔐</h2>
+                <p>Your OTP is:</p>
+                <h1>${otp}</h1>
+                <p>This OTP expires in 5 minutes.</p>
+            `,
         });
-        console.log("EMAIL RESPONSE:", info.response);
 
-        res.json({ ok: true, message: "OTP sent" });
+        res.json({ ok: true, message: "OTP sent successfully" });
     } catch (err) {
-        console.error(err);
+        console.error("Forgot Password OTP Error:", err);
         res.status(500).json({ error: "Failed to send OTP" });
     }
 });
 //test mail
 app.get("/test-email", async (req, res) => {
     try {
-        const info = await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER,
-            subject: "SMTP Test",
-            text: "If you receive this, SMTP works.",
+        await resend.emails.send({
+            from: "Yummly <onboarding@resend.dev>",
+            to: "yummlydelivers@gmail.com",
+            subject: "Resend Test",
+            html: "<h2>It works 🚀</h2>",
         });
 
-        res.json({ success: true, response: info.response });
+        res.json({ success: true });
     } catch (err) {
-        console.error("SMTP TEST ERROR:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -501,8 +508,8 @@ ${itemRows}
         // 🔥 SEND EMAIL
         // 🔥 SEND EMAIL (safe mode)
         try {
-            await transporter.sendMail({
-                from: process.env.EMAIL_USER || "yummlydelivers@gmail.com",
+            await resend.emails.send({
+                from: "Yummly <onboarding@resend.dev>",
                 to: user.email,
                 subject: `Yummly Receipt - Order #${orderId}`,
                 html: receiptHtml,
@@ -824,12 +831,14 @@ async function start() {
             console.log("✅ Gmail App Password configured");
         }
 
-        await initDb();
         try {
-            await transporter.verify();
-            console.log("✅ SMTP connection successful");
-        } catch (err) {
-            console.error("❌ SMTP verification failed:", err);
+            await initDb();
+            app.listen(PORT, () =>
+                console.log("✅ Server started on port", PORT)
+            );
+        } catch (e) {
+            console.error("❌ Failed to start server", e.message);
+            process.exit(1);
         }
         app.listen(PORT, () => console.log("✅ Server started on port", PORT));
     } catch (e) {
@@ -948,8 +957,8 @@ app.put("/delivery/orders/:id/status", async (req, res) => {
 
         try {
             if (status === "picked_up") {
-                await transporter.sendMail({
-                    from: process.env.EMAIL_USER || "yummlydelivers@gmail.com",
+                await resend.emails.send({
+                    from: "Yummly <onboarding@resend.dev>",
                     to: order.email,
                     subject: `Your Order is Out for Delivery 🚚`,
                     html: `
