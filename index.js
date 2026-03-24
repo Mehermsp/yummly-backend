@@ -57,6 +57,7 @@ const PORT = process.env.PORT || 8000;
 
 let pool;
 let availabilityColumnReady = false;
+let mealTypeColumnReady = false;
 
 async function ensureAvailabilityColumn() {
     if (availabilityColumnReady) {
@@ -82,6 +83,47 @@ async function ensureAvailabilityColumn() {
     }
 
     availabilityColumnReady = true;
+}
+
+async function ensureMealTypeColumn() {
+    if (mealTypeColumnReady) {
+        return;
+    }
+
+    const [mealTypeColumn] = await pool.query(
+        `
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'menu'
+        AND COLUMN_NAME = 'meal_type'
+    `,
+        [DB_NAME]
+    );
+
+    if (!mealTypeColumn.length) {
+        await pool.query(
+            "ALTER TABLE menu ADD COLUMN meal_type VARCHAR(30) NOT NULL DEFAULT 'Lunch' AFTER category"
+        );
+        console.log("Added menu.meal_type column");
+
+        await pool.query(`
+            UPDATE menu
+            SET meal_type = CASE
+                WHEN LOWER(name) REGEXP 'dosa|idli|uttapam|vada|sambhar|sambar|chai|coffee|lassi|sandwich'
+                    OR category = 'South Indian'
+                THEN 'Breakfast'
+                WHEN LOWER(name) REGEXP 'samosa|roll|fries|65|tikka|vada pav|spring|brownie|jamun|jalebi|kulfi|rasmalai|ice cream|soda|lemonade'
+                    OR category IN ('Street Food', 'Street', 'Starters', 'Dessert', 'Drinks')
+                THEN 'Snacks'
+                WHEN LOWER(name) REGEXP 'pizza|noodles|fried rice|chicken|fish|mutton|prawn|chettinad|tandoori|butter chicken'
+                THEN 'Dinner'
+                ELSE 'Lunch'
+            END
+        `);
+    }
+
+    mealTypeColumnReady = true;
 }
 
 async function initDb() {
@@ -124,6 +166,7 @@ async function initDb() {
     `);
 
     await ensureAvailabilityColumn();
+    await ensureMealTypeColumn();
 }
 
 // Email transporter (configure with your email service)
@@ -505,8 +548,9 @@ app.post("/auth/reset-password", async (req, res) => {
 
 // --- Get Menu ---
 app.get("/menu", async (req, res) => {
+    await ensureMealTypeColumn();
     const [rows] = await pool.query(
-        "SELECT id, name, description, price, image, category, season, rating, discount, popularity FROM menu"
+        "SELECT id, name, description, price, image, category, meal_type, season, rating, discount, popularity FROM menu"
     );
     res.json(rows);
 });
