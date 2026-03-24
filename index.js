@@ -42,7 +42,6 @@ const formatDeliveryPartnerHtml = (partner) => `
       <h3 style="margin:0 0 10px; color:#E53935;">Delivery Partner Details</h3>
       <p style="margin:4px 0;"><strong>Name:</strong> ${partner.name}</p>
       <p style="margin:4px 0;"><strong>Phone:</strong> ${partner.phone || "Not available"}</p>
-      <p style="margin:4px 0;"><strong>Email:</strong> ${partner.email || "Not available"}</p>
     </div>
 `;
 
@@ -963,15 +962,36 @@ app.get("/admin/orders", isAdmin, async (req, res) => {
 
         const [orders] = await pool.query(query, params);
 
-        for (const order of orders) {
-            const [items] = await pool.query(
-                `SELECT menu_id as id, name, price, qty
-                 FROM order_items
-                 WHERE order_id = ?`,
-                [order.id]
-            );
+        if (!orders.length) {
+            return res.json([]);
+        }
 
-            order.items = items;
+        const orderIds = orders.map((order) => order.id);
+        const [items] = await pool.query(
+            `
+            SELECT order_id, menu_id as id, name, price, qty
+            FROM order_items
+            WHERE order_id IN (?)
+            ORDER BY order_id DESC, id ASC
+            `,
+            [orderIds]
+        );
+
+        const itemsByOrderId = new Map();
+        for (const item of items) {
+            if (!itemsByOrderId.has(item.order_id)) {
+                itemsByOrderId.set(item.order_id, []);
+            }
+            itemsByOrderId.get(item.order_id).push({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                qty: item.qty,
+            });
+        }
+
+        for (const order of orders) {
+            order.items = itemsByOrderId.get(order.id) || [];
         }
 
         res.json(orders);
@@ -1076,6 +1096,12 @@ app.get("/user/:userId", async (req, res) => {
 app.post("/user/:userId/profile", async (req, res) => {
     const userId = parseInt(req.params.userId);
     const { name, phone, email } = req.body;
+    const normalizedPhone =
+        typeof phone === "string" ? phone.trim() : phone;
+
+    if (typeof phone !== "undefined" && !normalizedPhone) {
+        return res.status(400).json({ error: "Phone number is required" });
+    }
 
     // Ensure email uniqueness
     if (email) {
@@ -1097,7 +1123,7 @@ app.post("/user/:userId/profile", async (req, res) => {
     }
     if (typeof phone !== "undefined") {
         updates.push("phone = ?");
-        params.push(phone || "");
+        params.push(normalizedPhone);
     }
     if (typeof email !== "undefined") {
         updates.push("email = ?");
