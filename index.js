@@ -1137,7 +1137,7 @@ app.post("/user/:userId/profile", async (req, res) => {
     }
 
     const [rows] = await pool.query(
-        "SELECT id,name,email,phone FROM users WHERE id = ?",
+        "SELECT id,name,email,phone,role FROM users WHERE id = ?",
         [userId]
     );
     res.json({ user: rows[0] });
