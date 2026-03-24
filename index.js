@@ -37,6 +37,15 @@ async function sendEmail(to, subject, htmlContent) {
     }
 }
 
+const formatDeliveryPartnerHtml = (partner) => `
+    <div style="margin-top:20px; padding:16px; background:#fff4f4; border-radius:12px;">
+      <h3 style="margin:0 0 10px; color:#E53935;">Delivery Partner Details</h3>
+      <p style="margin:4px 0;"><strong>Name:</strong> ${partner.name}</p>
+      <p style="margin:4px 0;"><strong>Phone:</strong> ${partner.phone || "Not available"}</p>
+      <p style="margin:4px 0;"><strong>Email:</strong> ${partner.email || "Not available"}</p>
+    </div>
+`;
+
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -48,6 +57,34 @@ const DB_NAME = process.env.DB_NAME;
 const PORT = process.env.PORT || 8000;
 
 let pool;
+let availabilityColumnReady = false;
+
+async function ensureAvailabilityColumn() {
+    if (availabilityColumnReady) {
+        return;
+    }
+
+    const [availabilityColumn] = await pool.query(
+        `
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'users'
+        AND COLUMN_NAME = 'is_available'
+    `,
+        [DB_NAME]
+    );
+
+    if (!availabilityColumn.length) {
+        await pool.query(
+            "ALTER TABLE users ADD COLUMN is_available TINYINT(1) NOT NULL DEFAULT 1"
+        );
+        console.log("Added users.is_available column");
+    }
+
+    availabilityColumnReady = true;
+}
+
 async function initDb() {
     const config = {
         host: DB_HOST,
@@ -70,6 +107,24 @@ async function initDb() {
     }
 
     pool = await mysql.createPool(config);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS wishlists (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            menu_id INT,
+            name VARCHAR(255),
+            price DECIMAL(10,2),
+            image VARCHAR(1024),
+            description TEXT,
+            category VARCHAR(50),
+            discount INT DEFAULT 0,
+            KEY idx_user_id (user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (menu_id) REFERENCES menu(id) ON DELETE SET NULL
+        )
+    `);
+
+    await ensureAvailabilityColumn();
 }
 
 // Email transporter (configure with your email service)
@@ -681,11 +736,16 @@ app.get("/orders/:id", async (req, res) => {
 
         const [rows] = await pool.query(
             `
-            SELECT id, user_id as userId, total, status, created_at, delivered_at,
-       door_no, street, area, city, state, zip_code,
-       phone, notes
-            FROM orders
-            WHERE id = ?
+            SELECT o.id, o.user_id as userId, o.total, o.status, o.created_at, o.delivered_at,
+                   o.door_no, o.street, o.area, o.city, o.state, o.zip_code,
+                   o.phone, o.notes,
+                   db.id as delivery_boy_id,
+                   db.name as delivery_boy_name,
+                   db.phone as delivery_boy_phone,
+                   db.email as delivery_boy_email
+            FROM orders o
+            LEFT JOIN users db ON o.delivery_boy_id = db.id
+            WHERE o.id = ?
             `,
             [id]
         );
@@ -742,6 +802,46 @@ app.get("/cart/:userId", async (req, res) => {
     res.json(rows);
 });
 
+// --- Save or update wishlist ---
+app.post("/wishlist", async (req, res) => {
+    const { userId, items } = req.body;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    await pool.query("DELETE FROM wishlists WHERE user_id = ?", [userId]);
+    if (items && items.length) {
+        const promises = items.map((it) =>
+            pool.query(
+                `INSERT INTO wishlists
+                (user_id, menu_id, name, price, image, description, category, discount)
+                VALUES (?,?,?,?,?,?,?,?)`,
+                [
+                    userId,
+                    it.id,
+                    it.name,
+                    it.price,
+                    it.image || null,
+                    it.description || null,
+                    it.category || null,
+                    it.discount || 0,
+                ]
+            )
+        );
+        await Promise.all(promises);
+    }
+    res.json({ ok: true });
+});
+
+// --- Get wishlist ---
+app.get("/wishlist/:userId", async (req, res) => {
+    const userId = req.params.userId;
+    const [rows] = await pool.query(
+        `SELECT menu_id as id, name, price, image, description, category, discount
+         FROM wishlists WHERE user_id = ?`,
+        [userId]
+    );
+    res.json(rows);
+});
+
 // --- Get user orders ---
 app.get("/user/:userId/orders", async (req, res) => {
     try {
@@ -753,9 +853,14 @@ app.get("/user/:userId/orders", async (req, res) => {
         const offset = (page - 1) * limit;
 
         let query = `
-            SELECT id, total, status, created_at, delivered_at
-            FROM orders
-            WHERE user_id = ?
+            SELECT o.id, o.total, o.status, o.created_at, o.delivered_at,
+                   o.delivery_boy_id,
+                   db.name as delivery_boy_name,
+                   db.phone as delivery_boy_phone,
+                   db.email as delivery_boy_email
+            FROM orders o
+            LEFT JOIN users db ON o.delivery_boy_id = db.id
+            WHERE o.user_id = ?
         `;
 
         const params = [userId];
@@ -838,9 +943,13 @@ app.get("/admin/orders", isAdmin, async (req, res) => {
         const { startDate, endDate } = req.query;
 
         let query = `
-            SELECT o.*, u.name, u.email
+            SELECT o.*, u.name, u.email,
+                   db.name as delivery_boy_name,
+                   db.phone as delivery_boy_phone,
+                   db.email as delivery_boy_email
             FROM orders o
             JOIN users u ON o.user_id = u.id
+            LEFT JOIN users db ON o.delivery_boy_id = db.id
         `;
 
         const params = [];
@@ -1022,11 +1131,15 @@ async function start() {
 //assign delivery partner to order
 app.put("/admin/orders/:id/assign", isAdmin, async (req, res) => {
     try {
+        await ensureAvailabilityColumn();
         const orderId = parseInt(req.params.id);
         const { deliveryBoyId } = req.body;
 
         const [rows] = await pool.query(
-            "SELECT status FROM orders WHERE id = ?",
+            `SELECT o.status, o.user_id, o.total, u.name as customer_name, u.email as customer_email
+             FROM orders o
+             JOIN users u ON o.user_id = u.id
+             WHERE o.id = ?`,
             [orderId]
         );
 
@@ -1041,6 +1154,26 @@ app.put("/admin/orders/:id/assign", isAdmin, async (req, res) => {
             });
         }
 
+        const [deliveryRows] = await pool.query(
+            `SELECT id, name, email, phone, is_available
+             FROM users
+             WHERE id = ?
+             AND LOWER(TRIM(role)) = 'delivery'`,
+            [deliveryBoyId]
+        );
+
+        if (!deliveryRows.length) {
+            return res.status(404).json({ error: "Delivery boy not found" });
+        }
+
+        const deliveryBoy = deliveryRows[0];
+
+        if (!deliveryBoy.is_available) {
+            return res.status(400).json({
+                error: "Delivery boy is not active for work",
+            });
+        }
+
         await pool.query(
             `
             UPDATE orders 
@@ -1050,6 +1183,33 @@ app.put("/admin/orders/:id/assign", isAdmin, async (req, res) => {
             `,
             [deliveryBoyId, orderId]
         );
+
+        try {
+            const order = rows[0];
+            await sendEmail(
+                order.customer_email,
+                `Delivery Partner Assigned - YM${String(orderId).padStart(5, "0")}`,
+                `
+<div style="font-family:'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
+  <div style="max-width:580px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
+    <h2 style="margin:0; color:#E53935;">Your order has been assigned</h2>
+    <p style="color:#555; line-height:1.6; margin-top:16px;">
+      Hi ${order.customer_name}, your Yummly order YM${String(orderId).padStart(5, "0")} is now assigned to a delivery partner.
+    </p>
+    ${formatDeliveryPartnerHtml(deliveryBoy)}
+    <p style="margin-top:20px; color:#555;">
+      Order total: ₹${order.total}
+    </p>
+    <p style="margin-top:10px; color:#777;">
+      You can also see these details inside My Orders in the app.
+    </p>
+  </div>
+</div>
+                `
+            );
+        } catch (emailErr) {
+            console.error("Assignment email failed:", emailErr.message);
+        }
 
         res.json({ success: true });
     } catch (err) {
@@ -1079,6 +1239,53 @@ app.get("/delivery/orders", async (req, res) => {
     }
 
     res.json(orders);
+});
+app.get("/delivery/availability", async (req, res) => {
+    try {
+        await ensureAvailabilityColumn();
+        const userId = req.headers.userid;
+
+        const [rows] = await pool.query(
+            `SELECT is_available
+             FROM users
+             WHERE id = ?
+             AND LOWER(TRIM(role)) = 'delivery'`,
+            [userId]
+        );
+
+        if (!rows.length) {
+            return res.status(404).json({ error: "Delivery boy not found" });
+        }
+
+        res.json({ isAvailable: !!rows[0].is_available });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to fetch availability" });
+    }
+});
+app.put("/delivery/availability", async (req, res) => {
+    try {
+        await ensureAvailabilityColumn();
+        const userId = req.headers.userid;
+        const { isAvailable } = req.body;
+
+        const [result] = await pool.query(
+            `UPDATE users
+             SET is_available = ?
+             WHERE id = ?
+             AND LOWER(TRIM(role)) = 'delivery'`,
+            [isAvailable ? 1 : 0, userId]
+        );
+
+        if (!result.affectedRows) {
+            return res.status(404).json({ error: "Delivery boy not found" });
+        }
+
+        res.json({ success: true, isAvailable: !!isAvailable });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to update availability" });
+    }
 });
 //delivery boy update status
 app.put("/delivery/orders/:id/status", async (req, res) => {
@@ -1177,6 +1384,7 @@ app.put("/delivery/orders/:id/status", async (req, res) => {
 });
 //delivery boy update status for admin
 app.get("/admin/delivery-stats", isAdmin, async (req, res) => {
+    await ensureAvailabilityColumn();
     const [stats] = await pool.query(`
         SELECT u.id, u.name,
         SUM(CASE WHEN o.status IN ('accepted','preparing','picked_up') THEN 1 ELSE 0 END) AS active_orders,
@@ -1221,12 +1429,14 @@ app.get("/delivery/income", async (req, res) => {
 // --- Get All Delivery Boys ---
 app.get("/admin/delivery-boys", isAdmin, async (req, res) => {
     try {
+        await ensureAvailabilityColumn();
         const [rows] = await pool.query(`
             SELECT 
                 u.id,
                 u.name,
                 u.email,
                 u.phone,
+                u.is_available,
                 COUNT(CASE WHEN o.status IN ('accepted','preparing','picked_up') THEN 1 END) AS active_orders,
                 COUNT(CASE WHEN o.status = 'delivered' THEN 1 END) AS completed_orders
             FROM users u
@@ -1241,6 +1451,30 @@ app.get("/admin/delivery-boys", isAdmin, async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to fetch delivery boys" });
+    }
+});
+app.put("/admin/delivery-boys/:id/availability", isAdmin, async (req, res) => {
+    try {
+        await ensureAvailabilityColumn();
+        const deliveryBoyId = parseInt(req.params.id);
+        const { isAvailable } = req.body;
+
+        const [result] = await pool.query(
+            `UPDATE users
+             SET is_available = ?
+             WHERE id = ?
+             AND LOWER(TRIM(role)) = 'delivery'`,
+            [isAvailable ? 1 : 0, deliveryBoyId]
+        );
+
+        if (!result.affectedRows) {
+            return res.status(404).json({ error: "Delivery boy not found" });
+        }
+
+        res.json({ success: true, isAvailable: !!isAvailable });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to update availability" });
     }
 });
 app.use("/uploads", express.static("uploads"));

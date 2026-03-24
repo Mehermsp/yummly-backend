@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password VARCHAR(255) NOT NULL,
   role VARCHAR(50) DEFAULT 'user',
+  is_available TINYINT(1) NOT NULL DEFAULT 1,
   phone VARCHAR(30),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -62,6 +63,21 @@ CREATE TABLE IF NOT EXISTS carts (
   name VARCHAR(255),
   price DECIMAL(10,2),
   qty INT DEFAULT 1,
+  KEY idx_user_id (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (menu_id) REFERENCES menu(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS wishlists (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  menu_id INT,
+  name VARCHAR(255),
+  price DECIMAL(10,2),
+  image VARCHAR(1024),
+  description TEXT,
+  category VARCHAR(50),
+  discount INT DEFAULT 0,
   KEY idx_user_id (user_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (menu_id) REFERENCES menu(id) ON DELETE SET NULL

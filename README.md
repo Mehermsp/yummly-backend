@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# yummly-backend
-=======
 Server setup (Node + MySQL)
 
 1. Install dependencies
@@ -10,45 +7,35 @@ Server setup (Node + MySQL)
 2. Create MySQL database
 
     - Ensure MySQL server is running.
-    - Run the SQL in `schema.sql` (for example using mysql client):
+    - Run the SQL in `schema.sql`:
 
         mysql -u root -p < schema.sql
 
-    - Or paste the contents of `schema.sql` into a MySQL GUI and execute.
+3. Configure environment
 
-3. Configure MySQL credentials in index.js (optional)
+    - Set DB credentials in `server/.env`.
+    - Start the API with:
 
-    The current defaults are:
+        npm start
 
-    - host: 127.0.0.1
-    - user: root
-    - password: meher1234
-    - database: yummly
-    - port: 8000
+API endpoints
 
-4. Start server
+-   `GET /ping` health check
+-   `POST /auth/register` register new user
+-   `POST /auth/login` login user
+-   `GET /menu` get all menu items
+-   `POST /orders` create order
+-   `GET /orders/:id` get order details
+-   `POST /cart` save or update cart
+-   `GET /cart/:userId` get cart
+-   `POST /wishlist` save or update wishlist
+-   `GET /wishlist/:userId` get wishlist
+-   `GET /user/:userId` get user profile
+-   `POST /user/:userId/profile` update user profile
+-   `GET /user/:userId/orders` get user orders
 
-    npm start
-
-API Endpoints:
-
--   GET /ping - Health check
--   POST /auth/register { name, email, password } - Register new user
--   POST /auth/login { email, password } - Login user
--   GET /menu - Get all menu items
--   POST /orders { userId, items: [{id,name,price,qty}], total, paymentMethod } - Create order
--   GET /orders/:id - Get order details
--   POST /cart { userId, items: [{id,name,price,qty}] } - Save/update cart
--   GET /cart/:userId - Get user's cart
--   GET /user/:userId - Get user profile
--   POST /user/:userId/profile { name, phone, email } - Update user profile
--   GET /user/:userId/orders - Get user's orders
-
-Database:
+Database
 
 -   Uses MySQL with connection pooling
--   All data is persisted in the yummly database
--   Foreign key constraints ensure data integrity
-
-This server is suitable for local development and testing.
->>>>>>> 677259f (Backend Ready)
+-   Cart and wishlist data are persisted per user
+-   Foreign key constraints keep menu and user relations consistent
