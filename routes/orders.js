@@ -1,4 +1,4 @@
-registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
+function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
     app.post("/orders", async (req, res) => {
         console.log("Incoming order data:", req.body);
         try {
@@ -33,7 +33,9 @@ registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             const user = userRows[0];
             if (!doorNo || !street || !city || !zipCode || !phone) {
-                return res.status(400).json({ error: "Complete address required" });
+                return res
+                    .status(400)
+                    .json({ error: "Complete address required" });
             }
 
             const [r] = await getPool().query(
@@ -130,7 +132,10 @@ registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 );
                 console.log("Receipt email sent");
             } catch (emailErr) {
-                console.error("Email failed but order saved:", emailErr.message);
+                console.error(
+                    "Email failed but order saved:",
+                    emailErr.message
+                );
             }
 
             try {
@@ -236,11 +241,17 @@ registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 [requesterId]
             );
 
-            const isAdmin = requesterRows.length && requesterRows[0].role === "admin";
+            const isAdmin =
+                requesterRows.length && requesterRows[0].role === "admin";
             const isAssignedDelivery =
-                order.delivery_boy_id && Number(order.delivery_boy_id) === requesterId;
+                order.delivery_boy_id &&
+                Number(order.delivery_boy_id) === requesterId;
 
-            if (!isAdmin && order.userId !== requesterId && !isAssignedDelivery) {
+            if (
+                !isAdmin &&
+                order.userId !== requesterId &&
+                !isAssignedDelivery
+            ) {
                 return res.status(403).json({ error: "Forbidden" });
             }
 
