@@ -96,7 +96,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             );
 
             if (!rows.length || new Date(rows[0].expires_at) < new Date()) {
-                return res.status(400).json({ error: "Invalid or expired OTP" });
+                return res
+                    .status(400)
+                    .json({ error: "Invalid or expired OTP" });
             }
 
             const tempName = rows[0].temp_name;
@@ -109,7 +111,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 [tempName, emailLower, hash, "user"]
             );
 
-            await getPool().query("DELETE FROM otp_codes WHERE email=?", [emailLower]);
+            await getPool().query("DELETE FROM otp_codes WHERE email=?", [
+                emailLower,
+            ]);
 
             res.json({
                 user: {
@@ -132,7 +136,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
 
             console.log("Executing database query...");
             const [rows] = await getPool().query(
-                "SELECT id,name,email,role,password FROM users WHERE LOWER(email)=LOWER(?)",
+                "SELECT id,name,email,phone,role,password FROM users WHERE LOWER(email)=LOWER(?)",
                 [email]
             );
 
@@ -165,7 +169,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     app.post("/auth/forgot-password", async (req, res) => {
         try {
             const { email } = req.body;
-            if (!email) return res.status(400).json({ error: "Email required" });
+            if (!email)
+                return res.status(400).json({ error: "Email required" });
 
             const emailLower = email.trim().toLowerCase();
 
@@ -262,7 +267,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             );
 
             if (!rows.length || new Date(rows[0].expires_at) < new Date())
-                return res.status(400).json({ error: "Invalid or expired OTP" });
+                return res
+                    .status(400)
+                    .json({ error: "Invalid or expired OTP" });
 
             const resetToken = Math.random().toString(36).substring(2);
             const resetExpires = new Date(Date.now() + 10 * 60 * 1000);
@@ -290,7 +297,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             );
 
             if (!rows.length || new Date(rows[0].reset_expires) < new Date())
-                return res.status(400).json({ error: "Invalid or expired token" });
+                return res
+                    .status(400)
+                    .json({ error: "Invalid or expired token" });
 
             const hash = await bcrypt.hash(newPassword, 8);
 
@@ -299,7 +308,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 rows[0].user_id,
             ]);
 
-            await getPool().query("DELETE FROM otp_codes WHERE email=?", [emailLower]);
+            await getPool().query("DELETE FROM otp_codes WHERE email=?", [
+                emailLower,
+            ]);
 
             res.json({ ok: true, message: "Password reset successfully" });
         } catch (err) {

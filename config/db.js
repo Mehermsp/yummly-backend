@@ -3,6 +3,7 @@ const mysql = require("mysql2/promise");
 let pool;
 let availabilityColumnReady = false;
 let mealTypeColumnReady = false;
+let addressesColumnReady = false;
 
 async function ensureAvailabilityColumn() {
     if (availabilityColumnReady) {
@@ -71,6 +72,32 @@ async function ensureMealTypeColumn() {
     mealTypeColumnReady = true;
 }
 
+async function ensureAddressesColumn() {
+    if (addressesColumnReady) {
+        return;
+    }
+
+    const [addressesColumn] = await pool.query(
+        `
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = 'users'
+        AND COLUMN_NAME = 'addresses'
+    `,
+        [process.env.DB_NAME]
+    );
+
+    if (!addressesColumn.length) {
+        await pool.query(
+            "ALTER TABLE users ADD COLUMN addresses JSON DEFAULT ('[]')"
+        );
+        console.log("Added users.addresses column");
+    }
+
+    addressesColumnReady = true;
+}
+
 async function initDb() {
     const config = {
         host: process.env.DB_HOST,
@@ -110,6 +137,7 @@ async function initDb() {
 
     await ensureAvailabilityColumn();
     await ensureMealTypeColumn();
+    await ensureAddressesColumn();
 }
 
 function getPool() {
@@ -121,4 +149,5 @@ module.exports = {
     getPool,
     ensureAvailabilityColumn,
     ensureMealTypeColumn,
+    ensureAddressesColumn,
 };
