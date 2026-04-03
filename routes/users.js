@@ -1,12 +1,19 @@
 function registerUserRoutes(app, { getPool, requireSelfOrAdmin }) {
     app.get("/user/:userId", requireSelfOrAdmin, async (req, res) => {
         const userId = parseInt(req.params.userId);
+
         const [rows] = await getPool().query(
-            "SELECT id,name,email,phone,role FROM users WHERE id = ?",
+            "SELECT id,name,email,phone,role,addresses FROM users WHERE id = ?",
             [userId]
         );
+
         if (!rows.length) return res.status(404).json({ error: "Not found" });
-        res.json({ user: rows[0] });
+
+        // Parse JSON safely
+        const user = rows[0];
+        user.addresses = user.addresses ? JSON.parse(user.addresses) : [];
+
+        res.json({ user });
     });
 
     app.post("/user/:userId/profile", requireSelfOrAdmin, async (req, res) => {
@@ -44,7 +51,16 @@ function registerUserRoutes(app, { getPool, requireSelfOrAdmin }) {
             updates.push("email = ?");
             params.push(email || "");
         }
+        if (typeof addresses !== "undefined") {
+            updates.push("addresses = ?");
+            params.push(JSON.stringify(addresses || []));
+        }
 
+        if (updates.length) {
+            const sql = `UPDATE users SET ${updates.join(", ")} WHERE id = ?`;
+            params.push(userId);
+            await getPool().query(sql, params);
+        }
         if (updates.length) {
             const sql = `UPDATE users SET ${updates.join(", ")} WHERE id = ?`;
             params.push(userId);
