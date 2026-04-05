@@ -34,7 +34,7 @@ function registerAdminRoutes(
             const orderIds = orders.map((order) => order.id);
             const [items] = await getPool().query(
                 `
-            SELECT order_id, menu_item_id as id, name, price, qty
+            SELECT order_id, menu_id as id, name, price, qty
             FROM order_items
             WHERE order_id IN (?)
             ORDER BY order_id DESC, id ASC

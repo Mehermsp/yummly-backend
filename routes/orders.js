@@ -43,7 +43,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 [
                     userId,
                     total,
-                    "pending",
+                    pending,
                     paymentMethod,
                     doorNo,
                     street,
@@ -61,7 +61,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             for (const it of items) {
                 await getPool().query(
-                    "INSERT INTO order_items (order_id, menu_item_id, name, price, qty) VALUES (?,?,?,?,?)",
+                    "INSERT INTO order_items (order_id, menu_id, name, price, qty) VALUES (?,?,?,?,?)",
                     [orderId, it.id, it.name, it.price, it.qty]
                 );
             }
@@ -246,7 +246,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             const [items] = await getPool().query(
                 `
-            SELECT menu_item_id as id, name, price, qty
+            SELECT menu_id as id, name, price, qty
             FROM order_items
             WHERE order_id = ?
             `,

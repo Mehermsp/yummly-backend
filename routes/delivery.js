@@ -13,7 +13,7 @@ function registerDeliveryRoutes(app, { getPool, ensureAvailabilityColumn, sendEm
 
         for (const order of orders) {
             const [items] = await getPool().query(
-                "SELECT menu_item_id as id, name, price, qty FROM order_items WHERE order_id = ?",
+                "SELECT menu_id as id, name, price, qty FROM order_items WHERE order_id = ?",
                 [order.id]
             );
             order.items = items;

@@ -7,7 +7,7 @@ function registerCartRoutes(app, { getPool }) {
         if (items && items.length) {
             const promises = items.map((it) =>
                 getPool().query(
-                    "INSERT INTO carts (user_id, menu_item_id, name, price, qty) VALUES (?,?,?,?,?)",
+                    "INSERT INTO carts (user_id, menu_id, name, price, qty) VALUES (?,?,?,?,?)",
                     [userId, it.id, it.name, it.price, it.qty]
                 )
             );
@@ -19,7 +19,7 @@ function registerCartRoutes(app, { getPool }) {
     app.get("/cart/:userId", async (req, res) => {
         const userId = req.params.userId;
         const [rows] = await getPool().query(
-            "SELECT menu_item_id as id,name,price,qty FROM carts WHERE user_id = ?",
+            "SELECT menu_id as id, name, price, qty FROM carts WHERE user_id = ?",
             [userId]
         );
         res.json(rows);

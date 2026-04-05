@@ -8,8 +8,8 @@ function registerWishlistRoutes(app, { getPool }) {
             const promises = items.map((it) =>
                 getPool().query(
                     `INSERT INTO wishlists
-                (user_id, menu_item_id, name, price, image, description, category, discount)
-                VALUES (?,?,?,?,?,?,?,?)`,
+                 (user_id, menu_id, name, price, image, description, category, discount)
+                 VALUES (?,?,?,?,?,?,?,?)`,
                     [
                         userId,
                         it.id,
@@ -30,8 +30,8 @@ function registerWishlistRoutes(app, { getPool }) {
     app.get("/wishlist/:userId", async (req, res) => {
         const userId = req.params.userId;
         const [rows] = await getPool().query(
-            `SELECT menu_item_id as id, name, price, image, description, category, discount
-         FROM wishlists WHERE user_id = ?`,
+            `SELECT menu_id as id, name, price, image, description, category, discount
+             FROM wishlists WHERE user_id = ?`,
             [userId]
         );
         res.json(rows);
