@@ -2,13 +2,14 @@ function registerMenuRoutes(app, { getPool, ensureMealTypeColumn }) {
     app.get("/menu", async (req, res) => {
         try {
             const [rows] = await getPool().query(
-                `SELECT m.id, m.name, m.description, m.price, m.image, m.category, 
-                        m.meal_type, m.season, m.rating, m.discount, m.popularity,
-                        m.restaurant_id, r.name as restaurant_name
-                 FROM menu m
-                 LEFT JOIN restaurants r ON m.restaurant_id = r.id
-                 WHERE m.available = 1
-                 ORDER BY m.popularity DESC`
+                `SELECT mi.id, mi.name, mi.description, mi.price, mi.image, mi.category, 
+                        mi.meal_type, mi.season, mi.rating, mi.discount, mi.popularity,
+                        mi.restaurant_id, r.name as restaurant_name,
+                        mi.available, mi.food_type
+                 FROM menu_items mi
+                 LEFT JOIN restaurants r ON mi.restaurant_id = r.id
+                 WHERE mi.available = 1 AND r.status = 'approved'
+                 ORDER BY mi.popularity DESC`
             );
             res.json(rows);
         } catch (err) {
