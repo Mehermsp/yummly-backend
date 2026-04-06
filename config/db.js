@@ -107,6 +107,36 @@ async function initDb() {
         )
     `);
 
+    // Add restaurant_id column to orders table if it doesn't exist
+    try {
+        await pool.query("SELECT restaurant_id FROM orders LIMIT 1");
+    } catch (e) {
+        await pool.query("ALTER TABLE orders ADD COLUMN restaurant_id INT AFTER user_id");
+    }
+
+    // Reviews table for customer feedback
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            restaurant_id INT,
+            menu_item_id INT,
+            order_id INT,
+            rating DECIMAL(3,1) NOT NULL,
+            comment TEXT,
+            delivery_rating DECIMAL(3,1),
+            delivery_comment TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_user_id (user_id),
+            KEY idx_restaurant_id (restaurant_id),
+            KEY idx_menu_item_id (menu_item_id),
+            KEY idx_order_id (order_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+        )
+    `);
+
     await ensureAvailabilityColumn();
     await ensureMealTypeColumn();
 }

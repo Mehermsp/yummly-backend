@@ -16,6 +16,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 phone,
                 notes,
                 paymentId,
+                restaurantId,
             } = req.body;
 
             if (!items || items.length === 0) {
@@ -37,11 +38,12 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
             }
 
             const [r] = await getPool().query(
-                `INSERT INTO orders 
-    (user_id,total,status,payment_method,door_no,street,area,city,state,zip_code,phone,notes,payment_id,created_at) 
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+                `INSERT INTO orders
+    (user_id,restaurant_id,total,status,payment_method,door_no,street,area,city,state,zip_code,phone,notes,payment_id,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
                 [
                     userId,
+                    restaurantId,
                     total,
                     pending,
                     paymentMethod,
@@ -207,7 +209,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             const [rows] = await getPool().query(
                 `
-            SELECT o.id, o.user_id as userId, o.total, o.status, o.created_at, o.delivered_at,
+            SELECT o.id, o.user_id as userId, o.restaurant_id, o.total, o.status, o.created_at, o.delivered_at,
                    o.door_no, o.street, o.area, o.city, o.state, o.zip_code,
                    o.phone, o.notes,
                    db.id as delivery_partner_id,
@@ -272,7 +274,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
             const offset = (page - 1) * limit;
 
             let query = `
-            SELECT o.id, o.total, o.status, o.created_at, o.delivered_at,
+            SELECT o.id, o.restaurant_id, o.total, o.status, o.created_at, o.delivered_at,
                    o.delivery_partner_id,
                    db.name as delivery_boy_name,
                    db.phone as delivery_boy_phone,

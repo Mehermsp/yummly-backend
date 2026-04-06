@@ -24,6 +24,7 @@ const registerUserRoutes = require("./routes/users");
 const registerAdminRoutes = require("./routes/admin");
 const registerDeliveryRoutes = require("./routes/delivery");
 const registerAddressRoutes = require("./routes/addresses");
+const registerReviewRoutes = require("./routes/reviews");
 
 const app = express();
 app.use(cors());
@@ -53,6 +54,7 @@ registerUserRoutes(app, deps);
 registerAdminRoutes(app, deps);
 registerDeliveryRoutes(app, deps);
 registerAddressRoutes(app, deps);
+registerReviewRoutes(app, deps);
 
 app.use("/uploads", express.static("uploads"));
 
