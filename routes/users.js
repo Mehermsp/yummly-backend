@@ -1,3 +1,21 @@
+function parseAddresses(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string") {
+        try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            console.error("Failed to parse addresses:", error);
+            return [];
+        }
+    }
+    if (typeof value === "object") {
+        return Array.isArray(value.addresses) ? value.addresses : [value];
+    }
+    return [];
+}
+
 function registerUserRoutes(app, { getPool, requireSelfOrAdmin }) {
     app.get("/user/:userId", requireSelfOrAdmin, async (req, res) => {
         const userId = parseInt(req.params.userId);
@@ -9,14 +27,8 @@ function registerUserRoutes(app, { getPool, requireSelfOrAdmin }) {
 
         if (!rows.length) return res.status(404).json({ error: "Not found" });
 
-        // Parse JSON safely
         const user = rows[0];
-        try {
-            user.addresses = user.addresses ? JSON.parse(user.addresses) : [];
-        } catch (e) {
-            console.error("Failed to parse addresses:", e);
-            user.addresses = [];
-        }
+        user.addresses = parseAddresses(user.addresses);
 
         res.json({ user });
     });

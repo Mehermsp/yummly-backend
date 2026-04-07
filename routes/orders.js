@@ -5,7 +5,6 @@ function toNullableInt(value) {
 
 function normalizePaymentMethod(method) {
     switch (String(method || "").toLowerCase()) {
-        case "cod":
         case "cash":
             return "cash";
         case "card":
@@ -17,6 +16,14 @@ function normalizePaymentMethod(method) {
         default:
             return "cash";
     }
+}
+
+function generateOrderNumber() {
+    const timestamp = Date.now().toString().slice(-8);
+    const randomSuffix = Math.floor(Math.random() * 1000)
+        .toString()
+        .padStart(3, "0");
+    return `YM${timestamp}${randomSuffix}`;
 }
 
 function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
@@ -54,6 +61,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
             const normalizedSubtotal = Number(subtotal ?? total ?? 0);
             const normalizedDeliveryFee = Number(deliveryFee ?? 0);
             const normalizedTotal = Number(total ?? 0);
+            const initialOrderNumber = generateOrderNumber();
 
             if (!userIdNumber) {
                 return res.status(400).json({ error: "Invalid user" });
@@ -83,8 +91,8 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             const [r] = await connection.query(
                 `INSERT INTO orders
-    (user_id,restaurant_id,address_id,subtotal,delivery_fee,total,status,payment_method,payment_status,door_no,street,area,city,state,zip_code,phone,notes,payment_id,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+    (user_id,restaurant_id,address_id,subtotal,delivery_fee,total,status,payment_method,payment_status,order_number,door_no,street,area,city,state,zip_code,phone,notes,payment_id,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
                 [
                     userIdNumber,
                     restaurantIdNumber,
@@ -95,6 +103,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                     "placed",
                     normalizedPaymentMethod,
                     normalizedPaymentMethod === "cash" ? "pending" : "paid",
+                    initialOrderNumber,
                     doorNo,
                     street,
                     area,
