@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS menu (
+CREATE TABLE IF NOT EXISTS menu_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   description TEXT,
@@ -25,24 +25,88 @@ CREATE TABLE IF NOT EXISTS menu (
   rating DECIMAL(3,1) DEFAULT 4.0,
   discount INT DEFAULT 0,
   popularity INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  available TINYINT(1) NOT NULL DEFAULT 1,
+  restaurant_id INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS orders (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT,
+  restaurant_id INT,
   total DECIMAL(10,2) DEFAULT 0,
   status VARCHAR(50) DEFAULT 'pending',
-  driver TEXT,
   payment_method VARCHAR(50),
+  payment_status VARCHAR(50) DEFAULT 'pending',
+  payment_id VARCHAR(255),
+  delivery_partner_id INT,
+  address_id INT,
+  subtotal DECIMAL(10,2) DEFAULT 0,
+  discount_amount DECIMAL(10,2) DEFAULT 0,
+  delivery_fee DECIMAL(10,2) DEFAULT 0,
+  tax_amount DECIMAL(10,2) DEFAULT 0,
+  delivery_notes TEXT,
+  estimated_delivery_time TIMESTAMP,
+  actual_delivery_time TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  delivered_at TIMESTAMP,
+  order_number VARCHAR(50),
+  driver TEXT,
+  door_no VARCHAR(255),
+  street VARCHAR(255),
+  area VARCHAR(255),
+  city VARCHAR(100),
+  state VARCHAR(100),
+  zip_code VARCHAR(20),
   address TEXT,
   phone VARCHAR(30),
   notes TEXT,
-  payment_id VARCHAR(255),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_user_id (user_id),
   KEY idx_status (status),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  KEY idx_restaurant_id (restaurant_id),
+  KEY idx_delivery_partner_id (delivery_partner_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+  FOREIGN KEY (delivery_partner_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (address_id) REFERENCES addresses(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  phone VARCHAR(30),
+  otp VARCHAR(10) NOT NULL,
+  type VARCHAR(50) NOT NULL,
+  user_id INT,
+  expires_at TIMESTAMP NOT NULL,
+  temp_name VARCHAR(255),
+  temp_password VARCHAR(255),
+  reset_token VARCHAR(255),
+  reset_expires TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS addresses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  label VARCHAR(100) DEFAULT 'Home',
+  door_no VARCHAR(255),
+  street VARCHAR(255),
+  area VARCHAR(255),
+  city VARCHAR(100) NOT NULL,
+  state VARCHAR(100) NOT NULL,
+  pincode VARCHAR(20) NOT NULL,
+  landmark VARCHAR(255),
+  latitude DECIMAL(10,8),
+  longitude DECIMAL(11,8),
+  is_default TINYINT(1) DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_user_id (user_id),
+  INDEX idx_is_default (is_default)
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
