@@ -481,7 +481,6 @@ async function createSchema() {
             name VARCHAR(255),
             price DECIMAL(10,2),
             qty INT DEFAULT 1,
-            restaurant_id INT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (menu_id) REFERENCES menu_items(id) ON DELETE SET NULL,
             KEY idx_user_id (user_id)

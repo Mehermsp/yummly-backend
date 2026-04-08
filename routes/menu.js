@@ -35,7 +35,7 @@ function registerMenuRoutes(
                     r.name AS restaurant_name
              FROM menu_items m
              JOIN restaurants r ON r.id = m.restaurant_id
-             WHERE m.available = 1
+             WHERE (COALESCE(m.available, 0) = 1 OR COALESCE(m.is_available, 0) = 1)
                AND r.is_approved = 1
              ORDER BY m.popularity DESC`
         );
@@ -69,7 +69,7 @@ function registerMenuRoutes(
             const restaurant = restaurants[0];
 
             const [rows] = await getPool().query(
-                "SELECT id, name, description, price, image, category, meal_type, season, rating, discount, popularity FROM menu_items WHERE restaurant_id = ? AND available = 1 ORDER BY popularity DESC",
+                "SELECT id, name, description, price, image, category, meal_type, season, rating, discount, popularity FROM menu_items WHERE restaurant_id = ? AND (COALESCE(available, 0) = 1 OR COALESCE(is_available, 0) = 1) ORDER BY popularity DESC",
                 [id]
             );
             res.json({
@@ -87,13 +87,25 @@ function registerMenuRoutes(
     app.get("/restaurants/:id/menu", async (req, res) => {
         try {
             const { id } = req.params;
+            const requesterId = parseInt(req.headers.userid, 10);
             const [restaurants] = await getPool().query(
-                "SELECT id FROM restaurants WHERE id = ? AND is_approved = 1",
+                "SELECT id, owner_id, user_id, is_approved FROM restaurants WHERE id = ?",
                 [id]
             );
             if (!restaurants.length) {
                 return res.status(404).json({ error: "Restaurant not found" });
             }
+
+            const restaurant = restaurants[0];
+            const ownsRestaurant =
+                requesterId &&
+                (Number(restaurant.owner_id) === requesterId ||
+                    Number(restaurant.user_id) === requesterId);
+
+            if (!restaurant.is_approved && !ownsRestaurant) {
+                return res.status(403).json({ error: "Restaurant not approved" });
+            }
+
             // Return ALL menu items (including unavailable) for restaurant management
             const [rows] = await getPool().query(
                 "SELECT id, name, description, price, image, category, meal_type, cuisine_type, season, rating, discount, popularity, is_available, preparation_time_mins, restaurant_id, vendor_id, available, food_type FROM menu_items WHERE restaurant_id = ? ORDER BY popularity DESC, id DESC",

@@ -12,8 +12,10 @@ const upload = multer({
     },
 });
 function registerRestaurantRoutes(app, { getPool }) {
-    const requireRestaurantPartner = require("../middleware/isRestaurantPartner");
-    const getRestaurant = require("../middleware/getRestaurant");
+    const requireRestaurantPartner = require("../middleware/isRestaurantPartner")(
+        getPool
+    );
+    const getRestaurant = require("../middleware/getRestaurant")(getPool);
 
     // Get current restaurant profile
     app.get(
@@ -278,8 +280,8 @@ function registerRestaurantRoutes(app, { getPool }) {
     );
     app.get(
         "/restaurant/analytics",
-        requireRestaurantPartner(getPool),
-        getRestaurant(getPool),
+        requireRestaurantPartner,
+        getRestaurant,
         async (req, res) => {
         try {
             const restaurantId = req.restaurant.id;
@@ -352,8 +354,8 @@ function registerRestaurantRoutes(app, { getPool }) {
 
     app.post(
         "/upload/logo",
-        requireRestaurantPartner(getPool),
-        getRestaurant(getPool),
+        requireRestaurantPartner,
+        getRestaurant,
         upload.single("logo"),
         async (req, res) => {
         try {
@@ -388,8 +390,8 @@ function registerRestaurantRoutes(app, { getPool }) {
 
     app.post(
         "/upload/cover",
-        requireRestaurantPartner(getPool),
-        getRestaurant(getPool),
+        requireRestaurantPartner,
+        getRestaurant,
         upload.single("cover"),
         async (req, res) => {
         try {
@@ -424,8 +426,8 @@ function registerRestaurantRoutes(app, { getPool }) {
 
     app.delete(
         "/upload/image",
-        requireRestaurantPartner(getPool),
-        getRestaurant(getPool),
+        requireRestaurantPartner,
+        getRestaurant,
         async (req, res) => {
         try {
             const { publicId } = req.body;

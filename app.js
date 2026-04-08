@@ -172,7 +172,28 @@ app.use(express.static(staticDir, { index: false }));
 // SPA fallback - only serve index.html for non-API routes when no static file matches
 app.use((req, res, next) => {
     if (req.method !== "GET") return next();
-    const apiPatterns = ["/api", "/uploads", "/healthz", "/auth"];
+    const apiPatterns = [
+        "/api",
+        "/uploads",
+        "/upload",
+        "/healthz",
+        "/health",
+        "/ping",
+        "/diagnostics",
+        "/auth",
+        "/user",
+        "/users",
+        "/menu",
+        "/restaurants",
+        "/restaurant",
+        "/orders",
+        "/cart",
+        "/wishlist",
+        "/admin",
+        "/delivery",
+        "/notifications",
+        "/reviews",
+    ];
     if (apiPatterns.some((p) => req.path.startsWith(p))) return next();
     // Check if the requested path exists as a file or directory
     const fs = require("fs");

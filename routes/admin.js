@@ -340,8 +340,8 @@ function registerAdminRoutes(
 
                 const restaurantId = restaurantResult.insertId;
                 await getPool().query(
-                    "UPDATE restaurant_applications SET status = ?, restaurant_id = ?, approved_at = NOW() WHERE id = ?",
-                    ["approved", restaurantId, applicationId]
+                    "UPDATE restaurant_applications SET status = ?, updated_at = NOW() WHERE id = ?",
+                    ["approved", applicationId]
                 );
 
                 if (application.email) {
