@@ -939,13 +939,14 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
             const requesterRole = userRows[0].role;
             if (requesterRole !== "admin") {
                 const [restaurantRows] = await getPool().query(
-                    "SELECT owner_id FROM restaurants WHERE id = ?",
+                    "SELECT owner_id, user_id FROM restaurants WHERE id = ?",
                     [restaurantId]
                 );
 
                 if (
                     !restaurantRows.length ||
-                    restaurantRows[0].owner_id !== requesterId
+                    (Number(restaurantRows[0].owner_id) !== requesterId &&
+                        Number(restaurantRows[0].user_id) !== requesterId)
                 ) {
                     return res.status(403).json({ error: "Forbidden" });
                 }

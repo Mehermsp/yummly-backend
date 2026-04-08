@@ -1,5 +1,5 @@
 const multer = require("multer");
-const { uploadImage, deleteImage } = require("../utils/cloudinary.js");
+const { uploadImage } = require("../utils/cloudinary.js");
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -205,80 +205,6 @@ function registerRestaurantRoutes(app, { getPool }) {
         }
     );
     app.get(
-        "/restaurant/orders",
-        requireRestaurantPartner,
-        getRestaurant,
-        async (req, res) => {
-            try {
-                const restaurantId = req.restaurant.id;
-                const limit = parseInt(req.query.limit) || 10;
-                const page = parseInt(req.query.page) || 1;
-                const status = req.query.status;
-                const offset = (page - 1) * limit;
-
-                let query = `
-                    SELECT o.id, o.order_number, o.user_id, o.total, o.status,
-                           o.payment_status, o.created_at, o.delivered_at,
-                           u.name AS customer_name, u.phone AS customer_phone, u.email AS customer_email,
-                           a.door_no, a.street, a.area, a.city, a.pincode, a.landmark
-                    FROM orders o
-                    LEFT JOIN users u ON o.user_id = u.id
-                    LEFT JOIN addresses a ON o.address_id = a.id
-                    WHERE o.restaurant_id = ?
-                `;
-                const params = [restaurantId];
-
-                if (status && status !== "all") {
-                    query += " AND o.status = ?";
-                    params.push(status);
-                }
-
-                query += " ORDER BY o.created_at DESC LIMIT ? OFFSET ?";
-                params.push(limit, offset);
-
-                const [orders] = await getPool().query(query, params);
-
-                const [countRows] = await getPool().query(
-                    `SELECT COUNT(*) AS count
-                     FROM orders
-                     WHERE restaurant_id = ?${
-                         status && status !== "all" ? " AND status = ?" : ""
-                     }`,
-                    status && status !== "all"
-                        ? [restaurantId, status]
-                        : [restaurantId]
-                );
-
-                const ordersWithItems = await Promise.all(
-                    orders.map(async (order) => {
-                        const [items] = await getPool().query(
-                            `SELECT id, menu_id, name, price, qty
-                             FROM order_items
-                             WHERE order_id = ?`,
-                            [order.id]
-                        );
-
-                        return {
-                            ...order,
-                            items,
-                        };
-                    })
-                );
-
-                res.json({
-                    orders: ordersWithItems,
-                    total: countRows[0]?.count || 0,
-                    page,
-                    limit,
-                    totalPages: Math.ceil((countRows[0]?.count || 0) / limit),
-                });
-            } catch (err) {
-                console.error("Fetch orders error:", err);
-                res.status(500).json({ error: "Failed to fetch orders" });
-            }
-        }
-    );
-    app.get(
         "/restaurant/analytics",
         requireRestaurantPartner,
         getRestaurant,
@@ -424,25 +350,6 @@ function registerRestaurantRoutes(app, { getPool }) {
         }
     );
 
-    app.delete(
-        "/upload/image",
-        requireRestaurantPartner,
-        getRestaurant,
-        async (req, res) => {
-        try {
-            const { publicId } = req.body;
-            if (!publicId) {
-                return res.status(400).json({ error: "Public ID required" });
-            }
-
-            await deleteImage(publicId);
-            res.json({ success: true });
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: "Delete error" });
-        }
-        }
-    );
 }
 
 module.exports = registerRestaurantRoutes;

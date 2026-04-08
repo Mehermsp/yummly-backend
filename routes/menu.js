@@ -350,7 +350,13 @@ function registerMenuRoutes(
                 return res.status(400).json({ error: "No file uploaded" });
             }
 
-            const preset = String(req.body.preset || "menu_item").trim();
+            const rawPreset = String(
+                req.body.preset || req.query.preset || "menu_item"
+            )
+                .trim()
+                .toLowerCase();
+            const preset =
+                rawPreset === "restaurant" ? "general" : rawPreset;
             const allowedPresets = new Set([
                 "menu_item",
                 "restaurant_logo",

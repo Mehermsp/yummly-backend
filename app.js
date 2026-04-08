@@ -3,6 +3,7 @@ const session = require("express-session");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const path = require("path");
+const fs = require("fs");
 const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
 const rateLimit = require("./middleware/rateLimit");
@@ -164,10 +165,26 @@ registerOrderRoutes(app, deps);
 registerAdminRoutes(app, deps);
 registerDeliveryRoutes(app, deps);
 
-// Serve static files from the Vite build
-const staticDir = path.join(__dirname, "../tastiekit-restaurant/dist");
-console.log(`[Static] Serving from: ${staticDir}`);
-app.use(express.static(staticDir, { index: false }));
+// Serve static files from the Vite build (supports different deployment roots)
+const staticDirCandidates = [
+    path.join(__dirname, "../tastiekit-restaurant/dist"),
+    path.join(process.cwd(), "tastiekit-restaurant/dist"),
+    path.join(process.cwd(), "src/tastiekit-restaurant/dist"),
+];
+const staticDir =
+    staticDirCandidates.find((dir) =>
+        fs.existsSync(path.join(dir, "index.html"))
+    ) || staticDirCandidates[0];
+const staticIndexFile = path.join(staticDir, "index.html");
+const hasStaticBundle = fs.existsSync(staticIndexFile);
+console.log(
+    `[Static] Serving from: ${staticDir} (bundle ${
+        hasStaticBundle ? "found" : "missing"
+    })`
+);
+if (hasStaticBundle) {
+    app.use(express.static(staticDir, { index: false }));
+}
 
 // SPA fallback - only serve index.html for non-API routes when no static file matches
 app.use((req, res, next) => {
@@ -195,8 +212,13 @@ app.use((req, res, next) => {
         "/reviews",
     ];
     if (apiPatterns.some((p) => req.path.startsWith(p))) return next();
+    if (!hasStaticBundle) {
+        return res.status(404).json({
+            error: "Frontend bundle not found",
+            detail: "tastiekit-restaurant/dist/index.html is missing",
+        });
+    }
     // Check if the requested path exists as a file or directory
-    const fs = require("fs");
     const requestedPath = path.join(staticDir, req.path);
     const fileExists = fs.existsSync(requestedPath);
     console.log(`[SPA Fallback] path=${req.path}, fileExists=${fileExists}`);
