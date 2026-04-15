@@ -2,11 +2,17 @@ const axios = require("axios");
 
 async function sendEmail(to, subject, htmlContent) {
     const apiKey = process.env.BREVO_API_KEY;
-    const fromEmail = process.env.EMAIL_FROM || "no-reply@tastiekit.in";
+    const fromEmail = process.env.EMAIL_FROM;
     const fromName = process.env.EMAIL_FROM_NAME || "TastieKit";
 
     if (!apiKey) {
         throw new Error("Email service is not configured: BREVO_API_KEY missing");
+    }
+
+    if (!fromEmail) {
+        throw new Error(
+            "Email service is not configured: EMAIL_FROM missing"
+        );
     }
 
     try {

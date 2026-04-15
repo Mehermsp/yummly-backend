@@ -8,6 +8,10 @@ function normalizeOtp(value) {
     return String(value || "").replace(/\D/g, "").slice(0, 6);
 }
 
+function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+}
+
 async function createSession(req, user) {
     if (!req.session) return;
     req.session.userId = user.id;
@@ -29,19 +33,19 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .status(400)
                     .json({ error: "Email or phone is required" });
 
-            const normalizedIdentifier = String(identifier).trim();
-            if (
-                normalizedIdentifier.length < 3 ||
-                normalizedIdentifier.length > 120
-            ) {
+            const rawIdentifier = String(identifier).trim();
+            if (rawIdentifier.length < 3 || rawIdentifier.length > 120) {
                 return res.status(400).json({ error: "Invalid identifier" });
             }
-            const isEmail = EMAIL_REGEX.test(normalizedIdentifier);
+            const isEmail = EMAIL_REGEX.test(rawIdentifier);
+            const normalizedIdentifier = isEmail
+                ? normalizeEmail(rawIdentifier)
+                : rawIdentifier;
 
             const [users] = await getPool().query(
                 `SELECT id, name, email, phone, role FROM users
                  WHERE phone = ? OR LOWER(email) = LOWER(?)`,
-                [normalizedIdentifier, normalizedIdentifier]
+                [rawIdentifier, normalizedIdentifier]
             );
 
             if (!users.length) {
@@ -135,12 +139,15 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .status(400)
                     .json({ error: "Email/phone and OTP are required" });
 
-            const normalizedIdentifier = String(identifier).trim();
+            const rawIdentifier = String(identifier).trim();
             const normalizedOtp = normalizeOtp(otp);
             if (normalizedOtp.length !== 6) {
                 return res.status(400).json({ error: "Invalid OTP format" });
             }
-            const isEmail = EMAIL_REGEX.test(normalizedIdentifier);
+            const isEmail = EMAIL_REGEX.test(rawIdentifier);
+            const normalizedIdentifier = isEmail
+                ? normalizeEmail(rawIdentifier)
+                : rawIdentifier;
             const query = isEmail
                 ? `SELECT * FROM otp_codes
                  WHERE email = ?
@@ -175,6 +182,10 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             }
 
             const user = users[0];
+
+            await getPool().query("DELETE FROM otp_codes WHERE id = ?", [
+                rows[0].id,
+            ]);
 
             await createSession(req, user);
 
@@ -387,7 +398,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const { name, email, password } = req.body;
             if (!name || !email || !password)
                 return res.status(400).json({ error: "All fields required" });
-            if (!EMAIL_REGEX.test(String(email).trim().toLowerCase())) {
+            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
                 return res.status(400).json({ error: "Invalid email format" });
             }
             if (!PASSWORD_POLICY_REGEX.test(password)) {
@@ -396,7 +407,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 });
             }
 
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
 
             const [exists] = await getPool().query(
                 "SELECT id FROM users WHERE LOWER(email)=?",
@@ -483,7 +494,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             if (!email || !otp) {
                 return res.status(400).json({ error: "Email and OTP are required" });
             }
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
             const normalizedOtp = normalizeOtp(otp);
             if (!EMAIL_REGEX.test(emailLower)) {
                 return res.status(400).json({ error: "Invalid email format" });
@@ -542,7 +553,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .status(400)
                     .json({ error: "Email and password are required" });
             }
-            if (!EMAIL_REGEX.test(String(email).trim().toLowerCase())) {
+            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
                 return res.status(400).json({ error: "Invalid email format" });
             }
             console.log("Login attempt for:", email);
@@ -613,11 +624,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const { email } = req.body;
             if (!email)
                 return res.status(400).json({ error: "Email required" });
-            if (!EMAIL_REGEX.test(String(email).trim().toLowerCase())) {
+            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
                 return res.status(400).json({ error: "Invalid email format" });
             }
 
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
 
             const [users] = await getPool().query(
                 "SELECT id FROM users WHERE LOWER(email)=?",
@@ -695,7 +706,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     app.post("/auth/verify-reset-otp", async (req, res) => {
         try {
             const { email, otp } = req.body;
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
             const normalizedOtp = normalizeOtp(otp);
             if (normalizedOtp.length !== 6) {
                 return res.status(400).json({ error: "Invalid OTP format" });
@@ -726,7 +737,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     app.post("/auth/reset-password-otp", async (req, res) => {
         try {
             const { email, otp, newPassword } = req.body;
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
             const normalizedOtp = normalizeOtp(otp);
 
             if (!PASSWORD_POLICY_REGEX.test(newPassword || "")) {
@@ -827,7 +838,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     app.post("/auth/verify-otp", async (req, res) => {
         try {
             const { email, otp } = req.body;
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
             const normalizedOtp = normalizeOtp(otp);
             if (normalizedOtp.length !== 6) {
                 return res.status(400).json({ error: "Invalid OTP format" });
@@ -866,7 +877,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     error: "Password must be 8+ chars with uppercase, lowercase and number",
                 });
             }
-            const emailLower = email.trim().toLowerCase();
+            const emailLower = normalizeEmail(email);
 
             const [rows] = await getPool().query(
                 "SELECT * FROM otp_codes WHERE email=? AND reset_token=? ORDER BY id DESC LIMIT 1",

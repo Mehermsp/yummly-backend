@@ -145,6 +145,11 @@ async function ensureColumns() {
             "image_public_id",
             "image_public_id VARCHAR(255) DEFAULT NULL"
         );
+        await ensureColumn(
+            "otp_codes",
+            "reset_expires",
+            "reset_expires TIMESTAMP NULL DEFAULT NULL"
+        );
 
         // Orders columns
         await ensureColumn(
@@ -582,6 +587,7 @@ async function createSchema() {
             otp VARCHAR(20),
             type VARCHAR(50),
             reset_token VARCHAR(255),
+            reset_expires TIMESTAMP NULL,
             temp_name VARCHAR(255),
             temp_password VARCHAR(255),
             expires_at TIMESTAMP,

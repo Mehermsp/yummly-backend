@@ -39,6 +39,8 @@ function registerSystemRoutes(app, { getPool }) {
                 timestamp: new Date().toISOString(),
                 emailService: "Brevo",
                 brevoKey: process.env.BREVO_API_KEY ? "configured" : "missing",
+                emailFrom: process.env.EMAIL_FROM || "missing",
+                emailFromName: process.env.EMAIL_FROM_NAME || "TastieKit",
                 database: {
                     host: process.env.DB_HOST || "not set",
                     port: process.env.DB_PORT || "not set",
