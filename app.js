@@ -6,6 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
+const compression = require("compression");
 const rateLimit = require("./middleware/rateLimit");
 const winston = require("winston");
 
@@ -90,6 +91,11 @@ app.use(
     })
 );
 app.use(bodyParser.json({ limit: "1mb" }));
+app.use(
+    compression({
+        threshold: 1024,
+    })
+);
 app.use(cookieParser());
 
 class BoundedSessionStore extends session.Store {

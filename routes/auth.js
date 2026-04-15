@@ -4,6 +4,10 @@ const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const PASSWORD_POLICY_REGEX =
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[^\s]{8,128}$/;
 
+function normalizeOtp(value) {
+    return String(value || "").replace(/\D/g, "").slice(0, 6);
+}
+
 async function createSession(req, user) {
     if (!req.session) return;
     req.session.userId = user.id;
@@ -47,6 +51,13 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const user = users[0];
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expires = new Date(Date.now() + 5 * 60 * 1000);
+
+            await getPool().query(
+                isEmail
+                    ? "DELETE FROM otp_codes WHERE email = ? AND type = 'login'"
+                    : "DELETE FROM otp_codes WHERE phone = ? AND type = 'login'",
+                [normalizedIdentifier]
+            );
 
             await getPool().query(
                 "INSERT INTO otp_codes (email, phone, otp, type, user_id, expires_at) VALUES (?,?,?,?,?,?)",
@@ -125,24 +136,30 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .json({ error: "Email/phone and OTP are required" });
 
             const normalizedIdentifier = String(identifier).trim();
+            const normalizedOtp = normalizeOtp(otp);
+            if (normalizedOtp.length !== 6) {
+                return res.status(400).json({ error: "Invalid OTP format" });
+            }
             const isEmail = EMAIL_REGEX.test(normalizedIdentifier);
             const query = isEmail
                 ? `SELECT * FROM otp_codes
                  WHERE email = ?
                  AND otp = ?
                  AND type = 'login'
+                 AND expires_at > NOW()
                  ORDER BY id DESC LIMIT 1`
                 : `SELECT * FROM otp_codes
                  WHERE phone = ?
                  AND otp = ?
                  AND type = 'login'
+                 AND expires_at > NOW()
                  ORDER BY id DESC LIMIT 1`;
             const [rows] = await getPool().query(query, [
                 normalizedIdentifier,
-                otp,
+                normalizedOtp,
             ]);
 
-            if (!rows.length || new Date(rows[0].expires_at) < new Date()) {
+            if (!rows.length) {
                 return res
                     .status(400)
                     .json({ error: "Invalid or expired OTP" });
@@ -393,6 +410,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const expires = new Date(Date.now() + 5 * 60 * 1000);
 
             await getPool().query(
+                "DELETE FROM otp_codes WHERE email = ? AND type = 'registration'",
+                [emailLower]
+            );
+
+            await getPool().query(
                 `INSERT INTO otp_codes (email, otp, type, expires_at, temp_name, temp_password)
    VALUES (?,?,?,?,?,?)`,
                 [emailLower, otp, "registration", expires, name, password]
@@ -462,21 +484,22 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 return res.status(400).json({ error: "Email and OTP are required" });
             }
             const emailLower = email.trim().toLowerCase();
+            const normalizedOtp = normalizeOtp(otp);
             if (!EMAIL_REGEX.test(emailLower)) {
                 return res.status(400).json({ error: "Invalid email format" });
             }
-            if (!/^\d{6}$/.test(String(otp).trim())) {
+            if (normalizedOtp.length !== 6) {
                 return res.status(400).json({ error: "Invalid OTP format" });
             }
 
             const [rows] = await getPool().query(
                 `SELECT * FROM otp_codes 
-             WHERE email=? AND otp=? AND type='registration' 
-             ORDER BY id DESC LIMIT 1`,
-                [emailLower, otp]
+             WHERE email=? AND otp=? AND type='registration' AND expires_at > NOW()
+              ORDER BY id DESC LIMIT 1`,
+                [emailLower, normalizedOtp]
             );
 
-            if (!rows.length || new Date(rows[0].expires_at) < new Date()) {
+            if (!rows.length) {
                 return res
                     .status(400)
                     .json({ error: "Invalid or expired OTP" });
@@ -608,6 +631,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const expires = new Date(Date.now() + 5 * 60 * 1000);
 
             await getPool().query(
+                "DELETE FROM otp_codes WHERE email = ? AND type = 'reset'",
+                [emailLower]
+            );
+
+            await getPool().query(
                 "INSERT INTO otp_codes (email, otp, type, user_id, expires_at) VALUES (?,?,?,?,?)",
                 [emailLower, otp, "reset", users[0].id, expires]
             );
@@ -668,10 +696,14 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
         try {
             const { email, otp } = req.body;
             const emailLower = email.trim().toLowerCase();
+            const normalizedOtp = normalizeOtp(otp);
+            if (normalizedOtp.length !== 6) {
+                return res.status(400).json({ error: "Invalid OTP format" });
+            }
 
             const [rows] = await getPool().query(
                 `SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`,
-                [emailLower, otp]
+                [emailLower, normalizedOtp]
             );
 
             if (!rows.length) {
@@ -695,16 +727,20 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
         try {
             const { email, otp, newPassword } = req.body;
             const emailLower = email.trim().toLowerCase();
+            const normalizedOtp = normalizeOtp(otp);
 
             if (!PASSWORD_POLICY_REGEX.test(newPassword || "")) {
                 return res.status(400).json({
                     error: "Password must be 8+ chars with uppercase, lowercase and number",
                 });
             }
+            if (normalizedOtp.length !== 6) {
+                return res.status(400).json({ error: "Invalid OTP format" });
+            }
 
             const [rows] = await getPool().query(
                 `SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`,
-                [emailLower, otp]
+                [emailLower, normalizedOtp]
             );
 
             if (!rows.length) {
@@ -792,13 +828,17 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
         try {
             const { email, otp } = req.body;
             const emailLower = email.trim().toLowerCase();
+            const normalizedOtp = normalizeOtp(otp);
+            if (normalizedOtp.length !== 6) {
+                return res.status(400).json({ error: "Invalid OTP format" });
+            }
 
             const [rows] = await getPool().query(
-                "SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' ORDER BY id DESC LIMIT 1",
-                [emailLower, otp]
+                "SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1",
+                [emailLower, normalizedOtp]
             );
 
-            if (!rows.length || new Date(rows[0].expires_at) < new Date())
+            if (!rows.length)
                 return res
                     .status(400)
                     .json({ error: "Invalid or expired OTP" });

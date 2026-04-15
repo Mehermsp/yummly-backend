@@ -1,13 +1,21 @@
 const axios = require("axios");
 
 async function sendEmail(to, subject, htmlContent) {
+    const apiKey = process.env.BREVO_API_KEY;
+    const fromEmail = process.env.EMAIL_FROM || "no-reply@tastiekit.in";
+    const fromName = process.env.EMAIL_FROM_NAME || "TastieKit";
+
+    if (!apiKey) {
+        throw new Error("Email service is not configured: BREVO_API_KEY missing");
+    }
+
     try {
         await axios.post(
             "https://api.brevo.com/v3/smtp/email",
             {
                 sender: {
-                    name: "TastieKit",
-                    email: "tastiekit@gmail.com",
+                    name: fromName,
+                    email: fromEmail,
                 },
                 to: [{ email: to }],
                 subject: subject,
@@ -15,16 +23,22 @@ async function sendEmail(to, subject, htmlContent) {
             },
             {
                 headers: {
-                    "api-key": process.env.BREVO_API_KEY,
+                    "api-key": apiKey,
                     "Content-Type": "application/json",
                 },
+                timeout: 10000,
             }
         );
 
         console.log("Email sent to:", to);
     } catch (err) {
-        console.error("Brevo error:", err.response?.data || err.message);
-        throw err;
+        const providerError =
+            err.response?.data?.message ||
+            err.response?.data?.code ||
+            err.response?.data ||
+            err.message;
+        console.error("Brevo error:", providerError);
+        throw new Error(`Failed to send email: ${providerError}`);
     }
 }
 

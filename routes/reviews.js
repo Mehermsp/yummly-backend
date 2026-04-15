@@ -46,78 +46,15 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
             return res.status(403).json({ error: "Only restaurant owners can access this endpoint" });
         }
     };
-    // Add review for an order (restaurant & delivery review) - Only customers
+    // Order-level reviews are deprecated. Reviews are only for food items.
     app.post(
         "/orders/:orderId/review",
         requireCustomer,
         async (req, res) => {
-            try {
-                const orderId = parseInt(req.params.orderId);
-                const { rating, comment, delivery_rating, delivery_comment } =
-                    req.body;
-
-                const requesterId = parseInt(req.headers.userid);
-
-                // Get order details
-                const [orders] = await getPool().query(
-                    "SELECT user_id, restaurant_id FROM orders WHERE id = ?",
-                    [orderId]
-                );
-
-                if (!orders.length) {
-                    return res.status(404).json({ error: "Order not found" });
-                }
-
-                const order = orders[0];
-
-                // Verify user is the order creator
-                if (order.user_id !== requesterId) {
-                    return res.status(403).json({ error: "Unauthorized" });
-                }
-
-                // Check if review already exists
-                const [existing] = await getPool().query(
-                    "SELECT id FROM reviews WHERE order_id = ?",
-                    [orderId]
-                );
-
-                if (existing.length) {
-                    return res
-                        .status(400)
-                        .json({
-                            error: "Review already exists for this order",
-                        });
-                }
-
-                // Create review
-                const [result] = await getPool().query(
-                    `INSERT INTO reviews 
-                 (order_id, user_id, restaurant_id, rating, comment, delivery_rating, delivery_comment) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        orderId,
-                        requesterId,
-                        order.restaurant_id,
-                        rating || null,
-                        comment || null,
-                        delivery_rating || null,
-                        delivery_comment || null,
-                    ]
-                );
-
-                // Update restaurant rating
-                await updateRestaurantRating(order.restaurant_id);
-
-                const [rows] = await getPool().query(
-                    "SELECT id, order_id, user_id, restaurant_id, rating, comment, delivery_rating, delivery_comment, created_at FROM reviews WHERE id = ?",
-                    [result.insertId]
-                );
-
-                res.json(rows[0]);
-            } catch (error) {
-                console.error("Create review error:", error);
-                res.status(500).json({ error: "Failed to create review" });
-            }
+            res.status(410).json({
+                error: "Order-level reviews are no longer supported",
+                detail: "Submit food-item reviews using POST /menu/:menuItemId/review with { rating, comment, order_id }.",
+            });
         }
     );
 
@@ -134,6 +71,12 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
                 if (!rating) {
                     return res.status(400).json({ error: "Rating is required" });
                 }
+                if (!order_id) {
+                    return res.status(400).json({
+                        error: "order_id is required",
+                        detail: "Food-item reviews must be tied to a delivered order.",
+                    });
+                }
 
                 // Get menu item and restaurant
                 const [menuItems] = await getPool().query(
@@ -147,15 +90,45 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
 
                 const menuItem = menuItems[0];
 
-                // If order_id provided, verify user owns the order (optional)
-                if (order_id) {
-                    const [orders] = await getPool().query(
-                        "SELECT user_id FROM orders WHERE id = ?",
-                        [order_id]
-                    );
-                    if (orders.length && orders[0].user_id !== requesterId) {
-                        return res.status(403).json({ error: "Unauthorized - order doesn't belong to user" });
-                    }
+                // Verify user owns the order and that this menu item was part of the order.
+                const [orders] = await getPool().query(
+                    "SELECT id, user_id, restaurant_id, status FROM orders WHERE id = ?",
+                    [order_id]
+                );
+                if (!orders.length) {
+                    return res.status(404).json({ error: "Order not found" });
+                }
+                if (orders[0].user_id !== requesterId) {
+                    return res.status(403).json({ error: "Unauthorized" });
+                }
+                if (
+                    String(orders[0].status || "").toLowerCase().trim() !==
+                    "delivered"
+                ) {
+                    return res.status(400).json({
+                        error: "Order not delivered",
+                        detail: "You can only review items after delivery.",
+                    });
+                }
+                const [orderItems] = await getPool().query(
+                    "SELECT id FROM order_items WHERE order_id = ? AND menu_id = ? LIMIT 1",
+                    [order_id, menuItemId]
+                );
+                if (!orderItems.length) {
+                    return res.status(400).json({
+                        error: "Item not found in this order",
+                    });
+                }
+
+                // Prevent duplicate review for same item in same order by same user.
+                const [existingItemReview] = await getPool().query(
+                    "SELECT id FROM reviews WHERE order_id = ? AND user_id = ? AND menu_item_id = ? LIMIT 1",
+                    [order_id, requesterId, menuItemId]
+                );
+                if (existingItemReview.length) {
+                    return res.status(400).json({
+                        error: "Review already exists for this item",
+                    });
                 }
 
                 // Create review for menu item
@@ -168,7 +141,7 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
                         (order_id, user_id, restaurant_id, menu_item_id, rating, comment)
                         VALUES (?, ?, ?, ?, ?, ?)`;
                     insertParams = [
-                        order_id || null,
+                        order_id,
                         requesterId,
                         menuItem.restaurant_id,
                         menuItemId,
@@ -176,17 +149,10 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
                         comment || null,
                     ];
                 } catch (e) {
-                    // Column doesn't exist, use restaurant review
-                    insertQuery = `INSERT INTO reviews
-                        (order_id, user_id, restaurant_id, rating, comment)
-                        VALUES (?, ?, ?, ?, ?)`;
-                    insertParams = [
-                        order_id || null,
-                        requesterId,
-                        menuItem.restaurant_id,
-                        rating,
-                        comment || null,
-                    ];
+                    return res.status(500).json({
+                        error: "Database not ready for item reviews",
+                        detail: "Missing reviews.menu_item_id column.",
+                    });
                 }
 
                 const [result] = await getPool().query(insertQuery, insertParams);
@@ -244,6 +210,7 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
                  LIMIT ? OFFSET ?`,
                 [menuItemId, limit, offset]
             );
+            res.setHeader("Cache-Control", "public, max-age=60");
 
             const [countResult] = await getPool().query(
                 `SELECT COUNT(*) as count FROM reviews WHERE ${countWhereClause}`,
@@ -288,16 +255,19 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
 
             const restaurantId = restaurants[0].id;
 
-            // Get all reviews for this restaurant's menu items
-            let whereClause = "r.restaurant_id = ?";
+            // Get all food-item reviews for this restaurant
+            let whereClause = "r.restaurant_id = ? AND r.menu_item_id IS NOT NULL";
             let params = [restaurantId, limit, offset];
 
             // Check if menu_item_id column exists for filtering
             try {
                 await getPool().query("SELECT menu_item_id FROM reviews LIMIT 1");
-                // If column exists, we can filter by restaurant_id (which includes all reviews)
+                // Column exists and is required for food-item reviews
             } catch (e) {
-                // Column doesn't exist, whereClause is fine as is
+                return res.status(500).json({
+                    error: "Database not ready for item reviews",
+                    detail: "Missing reviews.menu_item_id column.",
+                });
             }
 
             const [rows] = await getPool().query(
@@ -332,25 +302,10 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
 
     // Get reviews for an order
     app.get("/orders/:orderId/review", async (req, res) => {
-        try {
-            const orderId = parseInt(req.params.orderId);
-
-            const [rows] = await getPool().query(
-                `SELECT id, order_id, user_id, restaurant_id, rating, comment, delivery_rating, delivery_comment, created_at 
-                 FROM reviews 
-                 WHERE order_id = ?`,
-                [orderId]
-            );
-
-            if (!rows.length) {
-                return res.json(null);
-            }
-
-            res.json(rows[0]);
-        } catch (error) {
-            console.error("Get review error:", error);
-            res.status(500).json({ error: "Failed to fetch review" });
-        }
+        res.status(410).json({
+            error: "Order-level reviews are no longer supported",
+            detail: "Only food-item reviews are supported.",
+        });
     });
 
     // Get reviews for a restaurant (public - anyone can read)
@@ -361,20 +316,21 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
             const offset = parseInt(req.query.offset) || 0;
 
             const [rows] = await getPool().query(
-                `SELECT r.id, r.order_id, r.user_id, r.rating, r.comment, r.delivery_rating, r.delivery_comment, r.created_at,
+                `SELECT r.id, r.order_id, r.user_id, r.menu_item_id, r.rating, r.comment, r.created_at,
                         u.name as user_name, u.profile_image
                  FROM reviews r
                  JOIN users u ON u.id = r.user_id
-                 WHERE r.restaurant_id = ?
+                 WHERE r.restaurant_id = ? AND r.menu_item_id IS NOT NULL
                  ORDER BY r.created_at DESC
                  LIMIT ? OFFSET ?`,
                 [restaurantId, limit, offset]
             );
 
             const [countResult] = await getPool().query(
-                "SELECT COUNT(*) as count FROM reviews WHERE restaurant_id = ?",
+                "SELECT COUNT(*) as count FROM reviews WHERE restaurant_id = ? AND menu_item_id IS NOT NULL",
                 [restaurantId]
             );
+            res.setHeader("Cache-Control", "public, max-age=60");
 
             res.json({
                 reviews: rows,
@@ -394,9 +350,9 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
             const userId = parseInt(req.params.userId);
 
             const [rows] = await getPool().query(
-                `SELECT id, order_id, restaurant_id, rating, comment, delivery_rating, delivery_comment, created_at 
+                `SELECT id, order_id, restaurant_id, menu_item_id, rating, comment, created_at 
                  FROM reviews 
-                 WHERE user_id = ?
+                 WHERE user_id = ? AND menu_item_id IS NOT NULL
                  ORDER BY created_at DESC`,
                 [userId]
             );
@@ -413,12 +369,11 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
         try {
             const reviewId = parseInt(req.params.reviewId);
             const requesterId = parseInt(req.headers.userid);
-            const { rating, comment, delivery_rating, delivery_comment } =
-                req.body;
+            const { rating, comment } = req.body;
 
             // Get review
             const [reviews] = await getPool().query(
-                "SELECT user_id, restaurant_id FROM reviews WHERE id = ?",
+                "SELECT user_id, restaurant_id, menu_item_id FROM reviews WHERE id = ?",
                 [reviewId]
             );
 
@@ -427,6 +382,12 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
             }
 
             const review = reviews[0];
+
+            if (!review.menu_item_id) {
+                return res.status(410).json({
+                    error: "Only food-item reviews can be updated",
+                });
+            }
 
             // Verify user is review owner
             if (review.user_id !== requesterId) {
@@ -444,15 +405,6 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
                 updates.push("comment = ?");
                 params.push(comment);
             }
-            if (delivery_rating !== undefined) {
-                updates.push("delivery_rating = ?");
-                params.push(delivery_rating);
-            }
-            if (delivery_comment !== undefined) {
-                updates.push("delivery_comment = ?");
-                params.push(delivery_comment);
-            }
-
             if (!updates.length) {
                 return res.status(400).json({ error: "No fields to update" });
             }
@@ -466,9 +418,10 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
 
             // Update restaurant rating
             await updateRestaurantRating(review.restaurant_id);
+            await updateMenuItemRating(review.menu_item_id);
 
             const [rows] = await getPool().query(
-                "SELECT id, order_id, user_id, restaurant_id, rating, comment, delivery_rating, delivery_comment, created_at FROM reviews WHERE id = ?",
+                "SELECT id, order_id, user_id, restaurant_id, menu_item_id, rating, comment, created_at FROM reviews WHERE id = ?",
                 [reviewId]
             );
 

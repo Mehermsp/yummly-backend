@@ -39,6 +39,7 @@ function registerMenuRoutes(
                AND r.is_approved = 1
              ORDER BY m.popularity DESC`
         );
+        res.setHeader("Cache-Control", "public, max-age=60");
         res.json(rows);
     });
 
@@ -47,6 +48,7 @@ function registerMenuRoutes(
             const [rows] = await getPool().query(
                 "SELECT * FROM restaurants WHERE is_approved = 1 ORDER BY rating DESC, id ASC"
             );
+            res.setHeader("Cache-Control", "public, max-age=60");
             res.json(rows);
         } catch (error) {
             res.status(500).json({
@@ -72,6 +74,7 @@ function registerMenuRoutes(
                 "SELECT id, name, description, price, image, category, meal_type, season, rating, discount, popularity FROM menu_items WHERE restaurant_id = ? AND (COALESCE(available, 0) = 1 OR COALESCE(is_available, 0) = 1) ORDER BY popularity DESC",
                 [id]
             );
+            res.setHeader("Cache-Control", "public, max-age=60");
             res.json({
                 ...restaurant,
                 menu: rows,
