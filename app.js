@@ -57,6 +57,7 @@ const registerDeliveryRoutes = require("./routes/delivery");
 const registerNotificationRoutes = require("./routes/notifications");
 const registerAddressRoutes = require("./routes/addresses");
 const registerReviewRoutes = require("./routes/reviews");
+const registerUnifiedApi = require("./api");
 
 const app = express();
 app.disable("x-powered-by");
@@ -310,6 +311,7 @@ registerOrderRoutes(app, deps);
 registerAdminRoutes(app, deps);
 registerAdminPortalRoutes(app, deps);
 registerDeliveryRoutes(app, deps);
+app.use("/api/v1", registerUnifiedApi(getPool));
 
 // Serve static files from the Vite build (supports different deployment roots)
 const staticDirCandidates = [
