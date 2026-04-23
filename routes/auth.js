@@ -127,7 +127,10 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             res.json(payload);
         } catch (err) {
             console.error("Login OTP Error:", err);
-            res.status(500).json({ error: "Failed to send OTP" });
+            res.status(500).json({
+                error: "Failed to send OTP",
+                detail: err.message,
+            });
         }
     });
 
@@ -505,7 +508,10 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             res.json(payload);
         } catch (err) {
             console.error("Registration OTP Error:", err);
-            res.status(500).json({ error: "Failed to send OTP" });
+            res.status(500).json({
+                error: "Failed to send OTP",
+                detail: err.message,
+            });
         }
     });
 
@@ -741,7 +747,10 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             res.json(payload);
         } catch (err) {
             console.error("Forgot Password OTP Error:", err);
-            res.status(500).json({ error: "Failed to send OTP" });
+            res.status(500).json({
+                error: "Failed to send OTP",
+                detail: err.message,
+            });
         }
     });
 
