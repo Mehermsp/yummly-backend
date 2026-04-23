@@ -431,10 +431,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 [emailLower, otp, "registration", expires, name, password]
             );
 
-            await sendEmail(
-                emailLower,
-                "Verify Your Yummly Account",
-                `
+            try {
+                await sendEmail(
+                    emailLower,
+                    "Verify Your Yummly Account",
+                    `
   <div style="font-family: 'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
     <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
       
@@ -479,9 +480,29 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     </div>
   </div>
   `
-            );
+                );
+            } catch (emailError) {
+                if (process.env.NODE_ENV === "production") {
+                    throw emailError;
+                }
 
-            res.json({ ok: true, message: "OTP sent successfully" });
+                console.warn(
+                    "Registration OTP email failed in non-production, returning OTP in response:",
+                    emailError.message
+                );
+                return res.json({
+                    ok: true,
+                    message:
+                        "Email delivery is unavailable in this environment. Use the development OTP.",
+                    otp,
+                });
+            }
+
+            const payload = { ok: true, message: "OTP sent successfully" };
+            if (process.env.NODE_ENV !== "production") {
+                payload.otp = otp;
+            }
+            res.json(payload);
         } catch (err) {
             console.error("Registration OTP Error:", err);
             res.status(500).json({ error: "Failed to send OTP" });
@@ -651,10 +672,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 [emailLower, otp, "reset", users[0].id, expires]
             );
 
-            await sendEmail(
-                emailLower,
-                "Reset Your TastieKit Password",
-                `
+            try {
+                await sendEmail(
+                    emailLower,
+                    "Reset Your TastieKit Password",
+                    `
   <div style="font-family:'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
     <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
 
@@ -694,9 +716,29 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
     </div>
   </div>
   `
-            );
+                );
+            } catch (emailError) {
+                if (process.env.NODE_ENV === "production") {
+                    throw emailError;
+                }
 
-            res.json({ ok: true, message: "OTP sent successfully" });
+                console.warn(
+                    "Reset OTP email failed in non-production, returning OTP in response:",
+                    emailError.message
+                );
+                return res.json({
+                    ok: true,
+                    message:
+                        "Email delivery is unavailable in this environment. Use the development OTP.",
+                    otp,
+                });
+            }
+
+            const payload = { ok: true, message: "OTP sent successfully" };
+            if (process.env.NODE_ENV !== "production") {
+                payload.otp = otp;
+            }
+            res.json(payload);
         } catch (err) {
             console.error("Forgot Password OTP Error:", err);
             res.status(500).json({ error: "Failed to send OTP" });
