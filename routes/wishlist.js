@@ -7,19 +7,8 @@ function registerWishlistRoutes(app, { getPool }) {
         if (items && items.length) {
             const promises = items.map((it) =>
                 getPool().query(
-                    `INSERT INTO wishlists
-                 (user_id, menu_id, name, price, image, description, category, discount)
-                 VALUES (?,?,?,?,?,?,?,?)`,
-                    [
-                        userId,
-                        it.id,
-                        it.name,
-                        it.price,
-                        it.image || null,
-                        it.description || null,
-                        it.category || null,
-                        it.discount || 0,
-                    ]
+                    `INSERT INTO wishlists (user_id, menu_id) VALUES (?,?)`,
+                    [userId, it.id || it.menu_id]
                 )
             );
             await Promise.all(promises);
@@ -30,11 +19,16 @@ function registerWishlistRoutes(app, { getPool }) {
     app.get("/wishlist/:userId", async (req, res) => {
         const userId = req.params.userId;
         const [rows] = await getPool().query(
-            `SELECT menu_id as id, name, price, image, description, category, discount
-             FROM wishlists WHERE user_id = ?`,
+            `SELECT m.id, m.name, m.price, m.image_url as image, m.description, m.category, m.discount_price
+             FROM wishlists w
+             JOIN menu_items m ON w.menu_id = m.id
+             WHERE w.user_id = ?`,
             [userId]
         );
-        res.json(rows);
+        res.json(rows.map(row => ({
+            ...row,
+            discount: row.price - (row.discount_price || row.price)
+        })));
     });
 }
 

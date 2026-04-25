@@ -193,6 +193,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             await createSession(req, user);
 
             let restaurant = null;
+            let sessionToken = null;
             if (user.role === "restaurant_partner") {
                 // 🔍 Check application status first
                 const [apps] = await getPool().query(
@@ -219,9 +220,16 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 }
 
                 restaurant = restaurants[0];
+
+                const crypto = require("crypto");
+                sessionToken = crypto.randomBytes(32).toString("hex");
+                await getPool().query(
+                    "INSERT INTO restaurant_sessions (user_id, token) VALUES (?, ?)",
+                    [user.id, sessionToken]
+                );
             }
 
-            res.json({ user, restaurant });
+            res.json({ user, restaurant, sessionToken });
         } catch (err) {
             console.error("Verify login OTP error:", err);
             res.status(500).json({ error: "Failed to verify OTP" });
@@ -608,6 +616,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             await createSession(req, user);
 
             let restaurant = null;
+            let sessionToken = null;
 
             if (user.role === "restaurant_partner") {
                 // 🔍 Check application status first
@@ -635,10 +644,17 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 }
 
                 restaurant = restaurants[0];
+                
+                const crypto = require("crypto");
+                sessionToken = crypto.randomBytes(32).toString("hex");
+                await getPool().query(
+                    "INSERT INTO restaurant_sessions (user_id, token) VALUES (?, ?)",
+                    [user.id, sessionToken]
+                );
             }
 
             console.log("Login successful for:", email);
-            res.json({ user, restaurant });
+            res.json({ user, restaurant, sessionToken });
         } catch (err) {
             console.error("Login error:", err.message);
             console.error("Stack:", err.stack);
@@ -753,83 +769,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             });
         }
     });
-
-    app.post("/auth/verify-reset-otp", async (req, res) => {
-        try {
-            const { email, otp } = req.body;
-            const emailLower = normalizeEmail(email);
-            const normalizedOtp = normalizeOtp(otp);
-            if (normalizedOtp.length !== 6) {
-                return res.status(400).json({ error: "Invalid OTP format" });
-            }
-
-            const [rows] = await getPool().query(
-                `SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`,
-                [emailLower, normalizedOtp]
-            );
-
-            if (!rows.length) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired OTP" });
-            }
-
-            res.json({
-                ok: true,
-                message: "OTP verified",
-                userId: rows[0].user_id,
-            });
-        } catch (err) {
-            console.error("Verify reset OTP error:", err);
-            res.status(500).json({ error: "Verification failed" });
-        }
-    });
-
-    app.post("/auth/reset-password-otp", async (req, res) => {
-        try {
-            const { email, otp, newPassword } = req.body;
-            const emailLower = normalizeEmail(email);
-            const normalizedOtp = normalizeOtp(otp);
-
-            if (!PASSWORD_POLICY_REGEX.test(newPassword || "")) {
-                return res.status(400).json({
-                    error: "Password must be 8+ chars with uppercase, lowercase and number",
-                });
-            }
-            if (normalizedOtp.length !== 6) {
-                return res.status(400).json({ error: "Invalid OTP format" });
-            }
-
-            const [rows] = await getPool().query(
-                `SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`,
-                [emailLower, normalizedOtp]
-            );
-
-            if (!rows.length) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired OTP" });
-            }
-
-            const hash = await bcrypt.hash(newPassword, 10);
-
-            await getPool().query(
-                "UPDATE users SET password = ? WHERE id = ?",
-                [hash, rows[0].user_id]
-            );
-
-            await getPool().query("DELETE FROM otp_codes WHERE email = ?", [
-                emailLower,
-            ]);
-
-            res.json({ ok: true, message: "Password reset successful" });
-        } catch (err) {
-            console.error("Reset password error:", err);
-            res.status(500).json({ error: "Reset failed" });
-        }
-    });
-
-    app.post("/auth/logout", async (req, res) => {
+    app.post("/auth/logout", async (req, res) => {
         if (req.session) {
             req.session.destroy();
         }

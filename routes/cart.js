@@ -8,7 +8,7 @@ function registerCartRoutes(app, { getPool }) {
             const promises = items.map((it) =>
                 getPool().query(
                     "INSERT INTO carts (user_id, menu_id, name, price, qty) VALUES (?,?,?,?,?)",
-                    [userId, it.id, it.name, it.price, it.qty]
+                    [userId, it.id || it.menu_id, it.name, it.price, it.qty]
                 )
             );
             await Promise.all(promises);

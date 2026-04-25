@@ -210,6 +210,14 @@ function registerAdminRoutes(
                 [deliveryBoyId, orderId]
             );
 
+            const adminId = req.user?.id || req.session?.userId;
+            if (adminId) {
+                await getPool().query(
+                    "INSERT INTO admin_activity_log (admin_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)",
+                    [adminId, "assigned_order", "order", orderId, JSON.stringify({ deliveryBoyId })]
+                );
+            }
+
             try {
                 const order = rows[0];
                 await sendEmail(
@@ -350,6 +358,14 @@ function registerAdminRoutes(
                     ["approved", applicationId]
                 );
 
+                const adminId = req.user?.id || req.session?.userId;
+                if (adminId) {
+                    await getPool().query(
+                        "INSERT INTO admin_activity_log (admin_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)",
+                        [adminId, "approved_restaurant", "restaurant_application", applicationId, JSON.stringify({ restaurantId })]
+                    );
+                }
+
                 if (application.email) {
                     await sendEmail(
                         application.email,
@@ -455,6 +471,49 @@ function registerAdminRoutes(
             }
         }
     );
+
+    app.get("/admin/restaurants", isAdmin, async (req, res) => {
+        try {
+            const [restaurants] = await getPool().query(
+                "SELECT id, name, owner_id, city, is_approved, is_active, fssai, gst, pan, created_at FROM restaurants ORDER BY created_at DESC"
+            );
+            res.json(restaurants);
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Failed to fetch restaurants" });
+        }
+    });
+
+    app.put("/admin/restaurants/:id/compliance", isAdmin, async (req, res) => {
+        try {
+            const restaurantId = parseInt(req.params.id);
+            const { fssai, gst, pan } = req.body;
+            const adminId = req.user?.id || req.session?.userId;
+
+            const [rows] = await getPool().query("SELECT id FROM restaurants WHERE id = ?", [restaurantId]);
+            if (!rows.length) {
+                return res.status(404).json({ error: "Restaurant not found" });
+            }
+
+            await getPool().query(
+                "UPDATE restaurants SET fssai = ?, gst = ?, pan = ? WHERE id = ?",
+                [fssai || null, gst || null, pan || null, restaurantId]
+            );
+
+            // Log activity
+            if (adminId) {
+                await getPool().query(
+                    "INSERT INTO admin_activity_log (admin_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)",
+                    [adminId, "updated_compliance", "restaurant", restaurantId, JSON.stringify({ fssai, gst, pan })]
+                );
+            }
+
+            res.json({ success: true, message: "Compliance details updated successfully" });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Failed to update compliance details" });
+        }
+    });
 }
 
 module.exports = registerAdminRoutes;
