@@ -515,9 +515,12 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 console.warn("[OTP] Registration email failed:", emailError.message);
             }
 
-            const payload = { ok: true, message: emailSent ? "OTP sent to your email" : "Email unavailable. Use the OTP below." };
-            payload.otp = otp; // always include for non-configured environments
-            res.json(payload);
+            res.json({
+                ok: true,
+                message: emailSent
+                    ? "OTP sent to your email"
+                    : "If email delivery is unavailable, please contact support.",
+            });
         } catch (err) {
             console.error("Registration OTP Error:", err);
             res.status(500).json({
@@ -648,7 +651,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 }
 
                 restaurant = restaurants[0];
-                
+
                 const crypto = require("crypto");
                 sessionToken = crypto.randomBytes(32).toString("hex");
                 await getPool().query(
@@ -749,9 +752,12 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 console.warn("[OTP] Reset email failed:", emailError.message);
             }
 
-            const payload = { ok: true, message: emailSent ? "OTP sent to your email" : "Email unavailable. Use the OTP below." };
-            payload.otp = otp; // always include when email is not configured
-            res.json(payload);
+            res.json({
+                ok: true,
+                message: emailSent
+                    ? "OTP sent to your email"
+                    : "If email delivery is unavailable, please contact support.",
+            });
         } catch (err) {
             console.error("Forgot Password OTP Error:", err);
             res.status(500).json({
