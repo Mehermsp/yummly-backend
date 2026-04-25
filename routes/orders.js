@@ -584,8 +584,8 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 requesterId
             ) {
                 const [restaurantRows] = await getPool().query(
-                    "SELECT id FROM restaurants WHERE id = ? AND (owner_id = ? OR user_id = ?)",
-                    [order.restaurant_id, requesterId, requesterId]
+                    "SELECT id FROM restaurants WHERE id = ? AND owner_id = ?",
+                    [order.restaurant_id, requesterId]
                 );
                 isRestaurantStaff = restaurantRows.length > 0;
             }
@@ -658,8 +658,8 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 restaurantId = req.query.restaurantId ? parseInt(req.query.restaurantId) : null;
             } else {
                 const [restaurantRows] = await getPool().query(
-                    "SELECT id FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC",
-                    [requesterId, requesterId]
+                    "SELECT id FROM restaurants WHERE owner_id = ? ORDER BY id ASC",
+                    [requesterId]
                 );
                 if (!restaurantRows.length) {
                     return res.status(404).json({ error: "Restaurant not found" });

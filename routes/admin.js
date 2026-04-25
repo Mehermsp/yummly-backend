@@ -16,8 +16,8 @@ function registerAdminRoutes(
 
             let query = `
             SELECT o.*, u.name, u.email,
-                   db.name as delivery_boy_name,
-                   db.phone as delivery_boy_phone,
+                   db.name as delivery_partner_name,
+                   db.phone as delivery_partner_phone,
                    db.email as delivery_boy_email
             FROM orders o
             JOIN users u ON o.user_id = u.id

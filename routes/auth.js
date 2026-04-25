@@ -56,15 +56,17 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const expires = new Date(Date.now() + 5 * 60 * 1000);
 
+            // Clean up any existing unused OTPs for this identifier
             await getPool().query(
                 isEmail
-                    ? "DELETE FROM otp_codes WHERE email = ? AND type = 'login'"
-                    : "DELETE FROM otp_codes WHERE phone = ? AND type = 'login'",
+                    ? "DELETE FROM otp_verifications WHERE email = ? AND type = 'login' AND is_used = 0"
+                    : "DELETE FROM otp_verifications WHERE phone = ? AND type = 'login' AND is_used = 0",
                 [normalizedIdentifier]
             );
 
+            // Insert new OTP into otp_verifications table
             await getPool().query(
-                "INSERT INTO otp_codes (email, phone, otp, type, user_id, expires_at) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO otp_verifications (email, phone, otp, type, user_id, expires_at, is_used) VALUES (?,?,?,?,?,?,0)",
                 [
                     isEmail ? normalizedIdentifier : null,
                     !isEmail ? normalizedIdentifier : null,
@@ -168,17 +170,21 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const normalizedIdentifier = isEmail
                 ? normalizeEmail(rawIdentifier)
                 : rawIdentifier;
+
+            // Query otp_verifications table, check is_used = 0
             const query = isEmail
-                ? `SELECT * FROM otp_codes
+                ? `SELECT * FROM otp_verifications
                  WHERE email = ?
                  AND otp = ?
                  AND type = 'login'
+                 AND is_used = 0
                  AND expires_at > NOW()
                  ORDER BY id DESC LIMIT 1`
-                : `SELECT * FROM otp_codes
+                : `SELECT * FROM otp_verifications
                  WHERE phone = ?
                  AND otp = ?
                  AND type = 'login'
+                 AND is_used = 0
                  AND expires_at > NOW()
                  ORDER BY id DESC LIMIT 1`;
             const [rows] = await getPool().query(query, [
@@ -203,7 +209,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
 
             const user = users[0];
 
-            await getPool().query("DELETE FROM otp_codes WHERE id = ?", [
+            // Mark OTP as used instead of deleting
+            await getPool().query("UPDATE otp_verifications SET is_used = 1 WHERE id = ?", [
                 rows[0].id,
             ]);
 
@@ -226,8 +233,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
 
                 // 🔍 Check approved restaurant
                 const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id, user.id]
+                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
+                    [user.id]
                 );
 
                 if (!restaurants.length) {
@@ -449,14 +456,14 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const expires = new Date(Date.now() + 5 * 60 * 1000);
 
             await getPool().query(
-                "DELETE FROM otp_codes WHERE email = ? AND type = 'registration'",
+                "DELETE FROM otp_verifications WHERE email = ? AND type = 'registration' AND is_used = 0",
                 [emailLower]
             );
 
             await getPool().query(
-                `INSERT INTO otp_codes (email, otp, type, expires_at, temp_name, temp_password)
-   VALUES (?,?,?,?,?,?)`,
-                [emailLower, otp, "registration", expires, name, password]
+                `INSERT INTO otp_verifications (email, otp, type, expires_at, is_used)
+                 VALUES (?, ?, ?, ?, 0)`,
+                [emailLower, otp, "registration", expires]
             );
 
             let emailSent = false;
@@ -546,8 +553,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             }
 
             const [rows] = await getPool().query(
-                `SELECT * FROM otp_codes 
-             WHERE email=? AND otp=? AND type='registration' AND expires_at > NOW()
+                `SELECT * FROM otp_verifications
+             WHERE email=? AND otp=? AND type='registration' AND is_used=0 AND expires_at > NOW()
               ORDER BY id DESC LIMIT 1`,
                 [emailLower, normalizedOtp]
             );
@@ -558,25 +565,33 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .json({ error: "Invalid or expired OTP" });
             }
 
-            const tempName = rows[0].temp_name;
-            const tempPassword = rows[0].temp_password;
-
-            const hash = await bcrypt.hash(tempPassword, 8);
+            // Get registration data from session
+            const tempData = req.session.tempRegistration;
+            if (!tempData || !tempData.name || !tempData.password) {
+                return res
+                    .status(400)
+                    .json({ error: "Registration session expired. Please register again." });
+            }
 
             const [result] = await getPool().query(
                 "INSERT INTO users (name,email,password,role) VALUES (?,?,?,?)",
-                [tempName, emailLower, hash, "customer"]
+                [tempData.name, emailLower, tempData.password, "customer"]
             );
 
             await createSession(req, { id: result.insertId, role: "customer" });
-            await getPool().query("DELETE FROM otp_codes WHERE email=?", [
-                emailLower,
+
+            // Mark OTP as used
+            await getPool().query("UPDATE otp_verifications SET is_used=1 WHERE id=?", [
+                rows[0].id,
             ]);
+
+            // Clear temp registration data from session
+            delete req.session.tempRegistration;
 
             res.json({
                 user: {
                     id: result.insertId,
-                    name: tempName,
+                    name: tempData.name,
                     email: emailLower,
                     role: "customer",
                 },
@@ -640,8 +655,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
 
                 // 🔍 Check approved restaurant
                 const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id, user.id]
+                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
+                    [user.id]
                 );
 
                 if (!restaurants.length) {
@@ -692,12 +707,12 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const expires = new Date(Date.now() + 5 * 60 * 1000);
 
             await getPool().query(
-                "DELETE FROM otp_codes WHERE email = ? AND type = 'reset'",
+                "DELETE FROM otp_verifications WHERE email = ? AND type = 'reset' AND is_used = 0",
                 [emailLower]
             );
 
             await getPool().query(
-                "INSERT INTO otp_codes (email, otp, type, user_id, expires_at) VALUES (?,?,?,?,?)",
+                "INSERT INTO otp_verifications (email, otp, type, user_id, expires_at, is_used) VALUES (?,?,?,?,?,0)",
                 [emailLower, otp, "reset", users[0].id, expires]
             );
 
@@ -794,8 +809,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             let restaurant = null;
             if (user.role === "restaurant_partner") {
                 const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id, user.id]
+                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
+                    [user.id]
                 );
                 restaurant = restaurants[0] || null;
             }
@@ -834,7 +849,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             }
 
             const [rows] = await getPool().query(
-                "SELECT * FROM otp_codes WHERE email=? AND otp=? AND type='reset' AND expires_at > NOW() ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM otp_verifications WHERE email=? AND otp=? AND type='reset' AND is_used=0 AND expires_at > NOW() ORDER BY id DESC LIMIT 1",
                 [emailLower, normalizedOtp]
             );
 
@@ -846,9 +861,16 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const resetToken = Math.random().toString(36).substring(2);
             const resetExpires = new Date(Date.now() + 10 * 60 * 1000);
 
+            // Create entry in password_resets table
             await getPool().query(
-                "UPDATE otp_codes SET reset_token=?, reset_expires=? WHERE id=?",
-                [resetToken, resetExpires, rows[0].id]
+                "INSERT INTO password_resets (user_id, email, otp, reset_token, reset_expires) VALUES (?,?,?,?,?)",
+                [rows[0].user_id, emailLower, normalizedOtp, resetToken, resetExpires]
+            );
+
+            // Mark OTP as used
+            await getPool().query(
+                "UPDATE otp_verifications SET is_used=1 WHERE id=?",
+                [rows[0].id]
             );
 
             res.json({ ok: true, resetToken });
@@ -869,7 +891,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             const emailLower = normalizeEmail(email);
 
             const [rows] = await getPool().query(
-                "SELECT * FROM otp_codes WHERE email=? AND reset_token=? ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM password_resets WHERE email=? AND reset_token=? ORDER BY id DESC LIMIT 1",
                 [emailLower, resetToken]
             );
 
@@ -878,14 +900,14 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                     .status(400)
                     .json({ error: "Invalid or expired token" });
 
-            const hash = await bcrypt.hash(newPassword, 8);
+            const hash = await bcrypt.hash(newPassword, 10);
 
             await getPool().query("UPDATE users SET password=? WHERE id=?", [
                 hash,
                 rows[0].user_id,
             ]);
 
-            await getPool().query("DELETE FROM otp_codes WHERE email=?", [
+            await getPool().query("DELETE FROM password_resets WHERE email=?", [
                 emailLower,
             ]);
 

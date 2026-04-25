@@ -245,8 +245,8 @@ function registerReviewRoutes(app, { getPool, requireSelfOrAdmin }) {
 
             // Get restaurant owned by this user
             const [restaurants] = await getPool().query(
-                "SELECT id FROM restaurants WHERE (owner_id = ? OR user_id = ?) AND is_approved = 1 ORDER BY id ASC LIMIT 1",
-                [requesterId, requesterId]
+                "SELECT id FROM restaurants WHERE owner_id = ? AND is_approved = 1 ORDER BY id ASC LIMIT 1",
+                [requesterId]
             );
 
             if (!restaurants.length) {

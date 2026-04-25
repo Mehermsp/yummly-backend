@@ -97,7 +97,7 @@ function registerMenuRoutes(app, { getPool, notifications }) {
             const { id } = req.params;
             const requesterId = parseInt(req.headers.userid, 10);
             const [restaurants] = await getPool().query(
-                "SELECT id, owner_id, user_id, is_approved FROM restaurants WHERE id = ?",
+                "SELECT id, owner_id, is_approved FROM restaurants WHERE id = ?",
                 [id]
             );
             if (!restaurants.length) {
@@ -105,10 +105,11 @@ function registerMenuRoutes(app, { getPool, notifications }) {
             }
 
             const restaurant = restaurants[0];
-            const ownsRestaurant =
-                requesterId &&
-                (Number(restaurant.owner_id) === requesterId ||
-                    Number(restaurant.user_id) === requesterId);
+            const ownsRestaurant = requesterId && Number(restaurant.owner_id) === requesterId;
+
+
+
+
 
             if (!restaurant.is_approved && !ownsRestaurant) {
                 return res

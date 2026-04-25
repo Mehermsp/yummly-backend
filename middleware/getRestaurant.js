@@ -8,8 +8,8 @@ function createGetRestaurant(getPool) {
 
         try {
             const [restaurants] = await getPool().query(
-                "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC",
-                [userId, userId]
+                "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC",
+                [userId]
             );
 
             if (!restaurants.length) {

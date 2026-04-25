@@ -68,8 +68,7 @@ function mapMenuItem(row) {
 }
 
 async function getOwnedRestaurant(pool, ownerId) {
-    return queryOne(pool, "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? LIMIT 1", [
-        ownerId,
+    return queryOne(pool, "SELECT * FROM restaurants WHERE owner_id = ? LIMIT 1", [
         ownerId,
     ]);
 }
