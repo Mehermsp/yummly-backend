@@ -38,9 +38,7 @@ const UPLOAD_PRESETS = {
     },
     general: {
         folder: "tastiekit/general",
-        transformation: [
-            { quality: "auto", fetch_format: "auto" },
-        ],
+        transformation: [{ quality: "auto", fetch_format: "auto" }],
     },
 };
 
@@ -54,19 +52,21 @@ function bufferToStream(buffer) {
 
 async function uploadImage(buffer, preset = "general", originalName = "") {
     const config = UPLOAD_PRESETS[preset] || UPLOAD_PRESETS.general;
-    
+
     const publicId = originalName
-        ? `${config.folder}/${originalName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9-_]/g, "_")}`
+        ? `${config.folder}/${originalName
+              .replace(/\.[^/.]+$/, "")
+              .replace(/[^a-zA-Z0-9-_]/g, "_")}`
         : undefined;
 
     const uploadOptions = {
-        folder: config.folder,
-        public_id: publicId,
+        // Only set folder if public_id is not provided (to avoid path duplication)
+        ...(publicId ? { public_id: publicId } : { folder: config.folder }),
         transformation: config.transformation,
         resource_type: "image",
         use_filename: true,
         unique_filename: true,
-        overwrite: true,
+        overwrite: publicId ? true : false,
     };
 
     return new Promise((resolve, reject) => {

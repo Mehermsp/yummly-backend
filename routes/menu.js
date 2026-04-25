@@ -38,10 +38,13 @@ function registerMenuRoutes(app, { getPool, notifications }) {
                  ORDER BY m.popularity DESC`
             );
             res.setHeader("Cache-Control", "public, max-age=60");
-            res.json(rows);
+            res.json(rows || []);
         } catch (error) {
-            console.error("Get menu error:", error);
-            res.status(500).json({ error: "Failed to fetch menu" });
+            console.error("Get menu error:", error.message, error.code);
+            res.status(500).json({
+                error: "Failed to fetch menu",
+                message: error.message,
+            });
         }
     });
 

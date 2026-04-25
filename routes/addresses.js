@@ -3,6 +3,9 @@ function registerAddressRoutes(app, { getPool, requireSelfOrAdmin }) {
     app.get("/user/:userId/addresses", requireSelfOrAdmin, async (req, res) => {
         try {
             const userId = parseInt(req.params.userId);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: "Invalid userId" });
+            }
 
             const [rows] = await getPool().query(
                 `SELECT id, label, door_no, street, landmark, area, city, state, pincode, 
@@ -13,10 +16,13 @@ function registerAddressRoutes(app, { getPool, requireSelfOrAdmin }) {
                 [userId]
             );
 
-            res.json(rows);
+            res.json(Array.isArray(rows) ? rows : []);
         } catch (error) {
-            console.error("Get addresses error:", error);
-            res.status(500).json({ error: "Failed to fetch addresses" });
+            console.error("Get addresses error:", error.message);
+            res.status(500).json({
+                error: "Failed to fetch addresses",
+                details: error.message,
+            });
         }
     });
 
