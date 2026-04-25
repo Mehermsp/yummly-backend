@@ -97,7 +97,42 @@ module.exports = function registerAuthRoutes(getPool) {
             }
 
             req.session.userId = toNumber(user.id);
-            return sendOk(res, { user: sanitizeUser(user) });
+
+            // For restaurant partners, also check application/restaurant status
+            const sanitized = sanitizeUser(user);
+            if (user.role === USER_ROLES.RESTAURANT) {
+                // Check if application is still pending
+                const pendingApp = await queryOne(
+                    getPool(),
+                    "SELECT status FROM restaurant_applications WHERE owner_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
+                    [user.id]
+                );
+                if (pendingApp) {
+                    throw new HttpError(403, "Your application is still under review");
+                }
+
+                // Fetch approved restaurant
+                const restaurant = await queryOne(
+                    getPool(),
+                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
+                    [user.id, user.id]
+                );
+                if (!restaurant) {
+                    throw new HttpError(403, "Your restaurant is not approved yet");
+                }
+
+                // Generate session token
+                const crypto = require("crypto");
+                const sessionToken = crypto.randomBytes(32).toString("hex");
+                await getPool().query(
+                    "INSERT INTO restaurant_sessions (user_id, token) VALUES (?, ?)",
+                    [user.id, sessionToken]
+                );
+
+                return sendOk(res, { user: sanitized, restaurant, sessionToken });
+            }
+
+            return sendOk(res, { user: sanitized });
         })
     );
 
@@ -131,7 +166,19 @@ module.exports = function registerAuthRoutes(getPool) {
                 return res.status(401).json({ success: false, error: "No active session" });
             }
 
-            return sendOk(res, { user: sanitizeUser(user) });
+            const sanitized = sanitizeUser(user);
+
+            // Attach restaurant data for restaurant partners so the PWA /auth/me works
+            if (user.role === USER_ROLES.RESTAURANT) {
+                const restaurant = await queryOne(
+                    getPool(),
+                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
+                    [userId, userId]
+                );
+                return sendOk(res, { user: sanitized, restaurant: restaurant || null });
+            }
+
+            return sendOk(res, { user: sanitized });
         })
     );
 

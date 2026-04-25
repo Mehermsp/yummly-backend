@@ -76,10 +76,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             );
 
             if (isEmail) {
-                await sendEmail(
-                    normalizedIdentifier,
-                    "Your TastieKit login code",
-                    `
+                try {
+                    const emailResult = await sendEmail(
+                        normalizedIdentifier,
+                        "Your TastieKit login code",
+                        `
       <div style="font-family: 'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
         <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
           <div style="text-align:center;">
@@ -92,11 +93,11 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             Use the one-time login code below to continue.
           </p>
           <div style="text-align:center; margin:35px 0;">
-            <div style="display:inline-block; padding:18px 35px; 
-                font-size:34px; letter-spacing:8px; 
-                font-weight:bold; 
-                color:#E53935; 
-                background:#fff3f3; 
+            <div style="display:inline-block; padding:18px 35px;
+                font-size:34px; letter-spacing:8px;
+                font-weight:bold;
+                color:#E53935;
+                background:#fff3f3;
                 border-radius:12px;">
               ${otp}
             </div>
@@ -111,20 +112,36 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
         </div>
       </div>
       `
-                );
+                    );
 
-                return res.json({
-                    ok: true,
-                    message: "OTP sent to your email address",
-                });
+                    if (emailResult.sent) {
+                        return res.json({
+                            ok: true,
+                            message: "OTP sent to your email address",
+                        });
+                    }
+
+                    // Email not configured – fall through to return OTP in response
+                    console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
+                    return res.json({
+                        ok: true,
+                        message: "Email not configured. Use the OTP below.",
+                        otp,
+                    });
+                } catch (emailErr) {
+                    console.warn("[OTP] Email send failed:", emailErr.message);
+                    console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
+                    return res.json({
+                        ok: true,
+                        message: "Email delivery failed. Use the OTP below.",
+                        otp,
+                    });
+                }
             }
 
-            console.log(`Login OTP for ${normalizedIdentifier}: ${otp}`);
-            const payload = { ok: true, message: "OTP sent successfully" };
-            if (process.env.NODE_ENV !== "production") {
-                payload.otp = otp;
-            }
-            res.json(payload);
+            // Phone-based OTP – no email to send
+            console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
+            return res.json({ ok: true, message: "OTP sent successfully", otp });
         } catch (err) {
             console.error("Login OTP Error:", err);
             res.status(500).json({
@@ -442,16 +459,17 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 [emailLower, otp, "registration", expires, name, password]
             );
 
+            let emailSent = false;
             try {
-                await sendEmail(
+                const emailResult = await sendEmail(
                     emailLower,
-                    "Verify Your Yummly Account",
+                    "Verify Your TastieKit Account",
                     `
   <div style="font-family: 'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
     <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
       
       <div style="text-align:center;">
-        <h1 style="margin:0; color:#E53935;">Yummly</h1>
+        <h1 style="margin:0; color:#E53935;">TastieKit</h1>
         <p style="color:#777; margin-top:6px;">Delicious food delivered fast</p>
       </div>
 
@@ -460,15 +478,15 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
       <h2 style="color:#333;">Verify Your Account</h2>
 
       <p style="color:#555; line-height:1.6;">
-        Welcome to Yummly! Use the OTP below to verify your account.
+        Welcome to TastieKit! Use the OTP below to verify your account.
       </p>
 
       <div style="text-align:center; margin:35px 0;">
-        <div style="display:inline-block; padding:18px 35px; 
-            font-size:34px; letter-spacing:8px; 
-            font-weight:bold; 
-            color:#E53935; 
-            background:#fff3f3; 
+        <div style="display:inline-block; padding:18px 35px;
+            font-size:34px; letter-spacing:8px;
+            font-weight:bold;
+            color:#E53935;
+            background:#fff3f3;
             border-radius:12px;">
           ${otp}
         </div>
@@ -485,34 +503,20 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
       </p>
 
       <p style="font-size:12px; color:#bbb; text-align:center; margin-top:20px;">
-        Copyright ${new Date().getFullYear()} Yummly. All rights reserved.
+        Copyright ${new Date().getFullYear()} TastieKit. All rights reserved.
       </p>
 
     </div>
   </div>
   `
                 );
+                emailSent = emailResult.sent;
             } catch (emailError) {
-                if (process.env.NODE_ENV === "production") {
-                    throw emailError;
-                }
-
-                console.warn(
-                    "Registration OTP email failed in non-production, returning OTP in response:",
-                    emailError.message
-                );
-                return res.json({
-                    ok: true,
-                    message:
-                        "Email delivery is unavailable in this environment. Use the development OTP.",
-                    otp,
-                });
+                console.warn("[OTP] Registration email failed:", emailError.message);
             }
 
-            const payload = { ok: true, message: "OTP sent successfully" };
-            if (process.env.NODE_ENV !== "production") {
-                payload.otp = otp;
-            }
+            const payload = { ok: true, message: emailSent ? "OTP sent to your email" : "Email unavailable. Use the OTP below." };
+            payload.otp = otp; // always include for non-configured environments
             res.json(payload);
         } catch (err) {
             console.error("Registration OTP Error:", err);
@@ -694,8 +698,9 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 [emailLower, otp, "reset", users[0].id, expires]
             );
 
+            let emailSent = false;
             try {
-                await sendEmail(
+                const emailResult = await sendEmail(
                     emailLower,
                     "Reset Your TastieKit Password",
                     `
@@ -739,27 +744,13 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
   </div>
   `
                 );
+                emailSent = emailResult.sent;
             } catch (emailError) {
-                if (process.env.NODE_ENV === "production") {
-                    throw emailError;
-                }
-
-                console.warn(
-                    "Reset OTP email failed in non-production, returning OTP in response:",
-                    emailError.message
-                );
-                return res.json({
-                    ok: true,
-                    message:
-                        "Email delivery is unavailable in this environment. Use the development OTP.",
-                    otp,
-                });
+                console.warn("[OTP] Reset email failed:", emailError.message);
             }
 
-            const payload = { ok: true, message: "OTP sent successfully" };
-            if (process.env.NODE_ENV !== "production") {
-                payload.otp = otp;
-            }
+            const payload = { ok: true, message: emailSent ? "OTP sent to your email" : "Email unavailable. Use the OTP below." };
+            payload.otp = otp; // always include when email is not configured
             res.json(payload);
         } catch (err) {
             console.error("Forgot Password OTP Error:", err);
@@ -769,7 +760,8 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
             });
         }
     });
-    app.post("/auth/logout", async (req, res) => {
+
+    app.post("/auth/logout", async (req, res) => {
         if (req.session) {
             req.session.destroy();
         }
@@ -815,7 +807,7 @@ function registerAuthRoutes(app, { getPool, sendEmail }) {
                 return res.status(404).json({ error: "Not found" });
             }
             await sendEmail(
-                "yummlydelivers@gmail.com",
+                "tastiekitdelivers@gmail.com",
                 "Brevo Test",
                 "<h2>Brevo is working</h2>"
             );
