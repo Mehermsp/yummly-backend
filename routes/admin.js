@@ -231,7 +231,7 @@ function registerAdminRoutes(
   <div style="max-width:580px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
     <h2 style="margin:0; color:#E53935;">Your order has been assigned</h2>
     <p style="color:#555; line-height:1.6; margin-top:16px;">
-      Hi ${order.customer_name}, your Yummly order YM${String(orderId).padStart(
+      Hi ${order.customer_name}, your TastieKit order YM${String(orderId).padStart(
                         5,
                         "0"
                     )} is now assigned to a delivery partner.
@@ -401,7 +401,7 @@ function registerAdminRoutes(
         await ensureColumns();
         const [stats] = await getPool().query(`
         SELECT u.id, u.name,
-        SUM(CASE WHEN o.status IN ('confirmed','preparing','prepared','picked_up') THEN 1 ELSE 0 END) AS active_orders,
+        SUM(CASE WHEN o.status IN ('confirmed','preparing','ready','picked_up') THEN 1 ELSE 0 END) AS active_orders,
         SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) AS completed_orders
         FROM users u
         LEFT JOIN orders o ON u.id = o.delivery_partner_id
@@ -422,7 +422,7 @@ function registerAdminRoutes(
                 u.email,
                 u.phone,
                 u.is_available,
-                COUNT(CASE WHEN o.status IN ('confirmed','preparing','prepared','picked_up') THEN 1 END) AS active_orders,
+                COUNT(CASE WHEN o.status IN ('confirmed','preparing','ready','picked_up') THEN 1 END) AS active_orders,
                 COUNT(CASE WHEN o.status = 'delivered' THEN 1 END) AS completed_orders
             FROM users u
             LEFT JOIN orders o ON u.id = o.delivery_partner_id

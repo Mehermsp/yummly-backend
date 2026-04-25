@@ -6,8 +6,8 @@ function registerDeliveryRoutes(
         const normalized = String(status || "").trim().toLowerCase();
         return (
             {
-                accepted: "confirmed",
-                ready: "prepared",
+                accepted: "ready",
+                prepared: "ready",
             }[normalized] || normalized
         );
     }
@@ -16,8 +16,9 @@ function registerDeliveryRoutes(
         const current = normalizeOrderStatus(currentStatus);
         const next = normalizeOrderStatus(nextStatus);
         const transitions = {
-            prepared: ["picked_up"],
-            picked_up: ["delivered"],
+            ready: ["picked_up"],
+            picked_up: ["on_the_way"],
+            on_the_way: ["delivered"],
             delivered: [],
             cancelled: [],
         };
@@ -182,15 +183,13 @@ function registerDeliveryRoutes(
 
             await getPool().query(
                 `
-            UPDATE orders 
-            SET status = ?, 
+            UPDATE orders
+            SET status = ?,
                 delivery_notes = ?,
-                delivered_at = ${
-                    normalizedStatus === "delivered" ? "NOW()" : "delivered_at"
-                }
+                delivered_at = CASE WHEN ? = 'delivered' THEN NOW() ELSE delivered_at END
             WHERE id = ?
             `,
-                [normalizedStatus, deliveryNotes || "", orderId]
+                [normalizedStatus, deliveryNotes || "", normalizedStatus, orderId]
             );
 
             try {
@@ -202,7 +201,7 @@ function registerDeliveryRoutes(
   <div style="font-family:'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
     <div style="max-width:520px; margin:auto; background:#fff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
       <h2 style="color:#FF9800;">Out for Delivery!</h2>
-      <p>Your Yummly order is on the way.</p>
+      <p>Your TastieKit order is on the way.</p>
       <p>Please keep your phone available for delivery updates.</p>
       <p style="color:#777;">Enjoy your meal!</p>
     </div>
@@ -221,7 +220,7 @@ function registerDeliveryRoutes(
       <h2 style="color:#4CAF50;">Delivered Successfully</h2>
       <p>Your order has been delivered.</p>
       <p>We hope you enjoy your meal.</p>
-      <p style="color:#777;">Thank you for choosing Yummly.</p>
+      <p style="color:#777;">Thank you for choosing TastieKit.</p>
     </div>
   </div>
   `

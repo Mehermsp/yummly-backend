@@ -5,8 +5,9 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
         PLACED: "placed",
         CONFIRMED: "confirmed",
         PREPARING: "preparing",
-        PREPARED: "prepared",
+        READY: "ready",
         PICKED_UP: "picked_up",
+        ON_THE_WAY: "on_the_way",
         DELIVERED: "delivered",
         CANCELLED: "cancelled",
     };
@@ -15,7 +16,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
     function generateOrderNumber() {
         const timestamp = Date.now().toString().slice(-8);
         const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
-        return `YM${timestamp}${randomSuffix}`;
+        return `TK${timestamp}${randomSuffix}`;
     }
 
     function normalizeOrderStatus(status) {
@@ -26,7 +27,8 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
         return (
             {
                 accepted: ORDER_STATUS.CONFIRMED,
-                ready: ORDER_STATUS.PREPARED,
+                ready: ORDER_STATUS.READY,
+                prepared: ORDER_STATUS.READY,
             }[normalized] || normalized
         );
     }
@@ -45,11 +47,15 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                 ORDER_STATUS.CANCELLED,
             ],
             [ORDER_STATUS.PREPARING]: [
-                ORDER_STATUS.PREPARED,
+                ORDER_STATUS.READY,
                 ORDER_STATUS.CANCELLED,
             ],
-            [ORDER_STATUS.PREPARED]: [],
-            [ORDER_STATUS.PICKED_UP]: [],
+            [ORDER_STATUS.READY]: [
+                ORDER_STATUS.PICKED_UP,
+                ORDER_STATUS.CANCELLED,
+            ],
+            [ORDER_STATUS.PICKED_UP]: [ORDER_STATUS.ON_THE_WAY],
+            [ORDER_STATUS.ON_THE_WAY]: [ORDER_STATUS.DELIVERED],
             [ORDER_STATUS.DELIVERED]: [],
             [ORDER_STATUS.CANCELLED]: [],
         };
@@ -271,7 +277,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                     <div style="font-family: 'Segoe UI', Arial; background: #f4f6fb; padding: 40px 20px;">
                         <div style="max-width: 650px; margin: auto; background: #fff; padding: 35px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08);">
                             <div style="text-align: center; margin-bottom: 30px;">
-                                <h1 style="margin: 0; color: #E53935; font-size: 28px;">Yummly</h1>
+                                <h1 style="margin: 0; color: #E53935; font-size: 28px;">TastieKit</h1>
                                 <p style="color: #777; margin-top: 5px;">Order Confirmation</p>
                             </div>
 
@@ -380,7 +386,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 <div style="font-family: 'Segoe UI', Arial; background: #f4f6fb; padding: 40px 20px;">
   <div style="max-width: 650px; margin: auto; background: #fff; padding: 35px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08);">
     <div style="text-align: center; margin-bottom: 30px;">
-      <h1 style="margin: 0; color: #E53935; font-size: 28px;">Yummly</h1>
+      <h1 style="margin: 0; color: #E53935; font-size: 28px;">TastieKit</h1>
       <p style="color: #777; margin-top: 5px;">Order Receipt</p>
     </div>
 
@@ -434,7 +440,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
     </p>
 
     <p style="font-size:12px; color:#bbb; text-align:center;">
-      Copyright ${new Date().getFullYear()} Yummly
+      Copyright ${new Date().getFullYear()} TastieKit
     </p>
 
   </div>
@@ -443,7 +449,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
                 await sendEmail(
                     user.email,
-                    `Yummly Receipt - Order #${orderId}`,
+                    `TastieKit Receipt - Order #${orderId}`,
                     receiptHtml
                 );
                 console.log("Receipt email sent");
@@ -466,11 +472,11 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
         <h2 style="color:#E53935;">New Order Received!</h2>
 
-        <p>A new order has been placed on Yummly.</p>
+        <p>A new order has been placed on TastieKit.</p>
 
         <hr style="margin:20px 0;" />
 
-        <p><strong>Order ID:</strong> YM${String(orderId).padStart(5, "0")}</p>
+        <p><strong>Order ID:</strong> TK${String(orderId).padStart(5, "0")}</p>
         <p><strong>Customer:</strong> ${user.name}</p>
         <p><strong>Total Amount:</strong> Rs.${total}</p>
         <p><strong>Payment:</strong> ${String(
@@ -492,7 +498,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
         </p>
 
         <p style="font-size:12px; color:#bbb; text-align:center;">
-          Copyright ${new Date().getFullYear()} Yummly
+          Copyright ${new Date().getFullYear()} TastieKit
         </p>
 
       </div>
@@ -503,7 +509,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
                     admins.map((admin) =>
                         sendEmail(
                             admin.email,
-                            `New Order - YM${String(orderId).padStart(5, "0")}`,
+                            `New Order - TK${String(orderId).padStart(5, "0")}`,
                             adminHtml
                         )
                     )
@@ -827,13 +833,13 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             // Update order status
             const updateFields = { status };
-            if (status === "delivered") {
+            if (status === ORDER_STATUS.DELIVERED) {
                 updateFields.delivered_at = new Date();
             }
 
             await getPool().query(
                 "UPDATE orders SET status = ?, delivered_at = ? WHERE id = ?",
-                [status, updateFields.delivered_at || null, orderId]
+                [normalizeOrderStatus(status), updateFields.delivered_at || null, orderId]
             );
 
             // Log status change
@@ -925,7 +931,7 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
 
             const currentStatus = orders[0].status.toLowerCase();
             if (
-                ["delivered", "cancelled", "picked_up"].includes(currentStatus)
+                [ORDER_STATUS.DELIVERED, ORDER_STATUS.CANCELLED, ORDER_STATUS.PICKED_UP].includes(currentStatus)
             ) {
                 return res
                     .status(400)
@@ -1009,9 +1015,9 @@ function registerOrderRoutes(app, { getPool, sendEmail, requireSelfOrAdmin }) {
             await getPool().query(
                 `UPDATE orders
                  SET status = ?,
-                      delivered_at = CASE WHEN ? = 'delivered' THEN NOW() ELSE delivered_at END
+                      delivered_at = CASE WHEN ? = ? THEN NOW() ELSE delivered_at END
               WHERE id = ?`,
-                [normalizedStatus, normalizedStatus, orderId]
+                [normalizedStatus, normalizedStatus, ORDER_STATUS.DELIVERED, orderId]
             );
 
             await logOrderStatus(orderId, normalizedStatus);
