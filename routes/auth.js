@@ -1,939 +1,443 @@
-const bcrypt = require("bcryptjs");
+import express from "express";
+import jwt from "jsonwebtoken";
+import { getOne, insert, query, update } from "../config/database.js";
+import { authenticate } from "../middleware/auth.js";
+import {
+    asyncHandler,
+    AuthenticationError,
+    ConflictError,
+    ValidationError,
+    sendSuccess,
+} from "../middleware/errorHandler.js";
+import {
+    generateAccessToken,
+    generateOTP,
+    generateRefreshToken,
+    hashPassword,
+    verifyPassword,
+    verifyRefreshToken,
+} from "../utils/auth.js";
 
-const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const PASSWORD_POLICY_REGEX =
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[^\s]{8,128}$/;
+const router = express.Router();
+const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
+const RESET_TOKEN_SECRET =
+    process.env.PASSWORD_RESET_SECRET || process.env.JWT_SECRET || "reset-secret";
 
-function normalizeOtp(value) {
-    return String(value || "").replace(/\D/g, "").slice(0, 6);
-}
+const APP_ROLES = new Set(["customer", "delivery_partner"]);
+const PORTAL_ROLES = new Set(["admin", "vendor", "restaurant_partner"]);
 
-function normalizeEmail(value) {
-    return String(value || "").trim().toLowerCase();
-}
+const sanitizeUser = (user) => ({
+    id: Number(user.id),
+    name: user.name || "",
+    email: user.email || "",
+    phone: user.phone || "",
+    role: user.role || "customer",
+    is_available: Boolean(user.is_available),
+    profile_image: user.profile_image || "",
+    profile_image_public_id: user.profile_image_public_id || "",
+    is_email_verified: Boolean(user.is_email_verified),
+    delivery_fee_per_order: Number(user.delivery_fee_per_order || 0),
+    created_at: user.created_at,
+});
 
-async function createSession(req, user) {
-    if (!req.session) return;
-    req.session.userId = user.id;
-    req.session.userRole = user.role;
-    await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-            if (err) reject(err);
-            else resolve();
+const createSessionPayload = (user) => {
+    const safeUser = sanitizeUser(user);
+    return {
+        user: safeUser,
+        accessToken: generateAccessToken(safeUser.id, safeUser.role),
+        refreshToken: generateRefreshToken(safeUser.id, safeUser.role),
+        portalOnly: PORTAL_ROLES.has(safeUser.role),
+        appAccessAllowed: APP_ROLES.has(safeUser.role),
+        portalMessage: PORTAL_ROLES.has(safeUser.role)
+            ? safeUser.role === "admin"
+                ? "Admins should sign in through the admin portal."
+                : "Restaurant partners should sign in through the restaurant portal."
+            : null,
+    };
+};
+
+const getUserById = (userId) =>
+    getOne(
+        `SELECT
+            id,
+            name,
+            email,
+            phone,
+            role,
+            is_available,
+            profile_image,
+            profile_image_public_id,
+            is_email_verified,
+            delivery_fee_per_order,
+            created_at
+        FROM users
+        WHERE id = ?
+        LIMIT 1`,
+        [userId]
+    );
+
+const getUserByIdentifier = (identifier) =>
+    getOne(
+        `SELECT
+            id,
+            name,
+            email,
+            phone,
+            role,
+            password,
+            is_available,
+            profile_image,
+            profile_image_public_id,
+            is_email_verified,
+            delivery_fee_per_order,
+            created_at
+        FROM users
+        WHERE email = ? OR phone = ?
+        LIMIT 1`,
+        [identifier, identifier]
+    );
+
+const clearOtpRecords = async (email, type) => {
+    await query(
+        "DELETE FROM otp_verifications WHERE email = ? AND type = ?",
+        [email, type]
+    );
+};
+
+const createOtpRecord = async ({ email, type }) => {
+    const otp = generateOTP();
+    const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await clearOtpRecords(email, type);
+    await insert("otp_verifications", {
+        email,
+        otp,
+        type,
+        user_id: null,
+        expires_at: expiresAt,
+        is_used: 0,
+    });
+
+    return { otp, expiresAt };
+};
+
+const consumeOtpRecord = async ({ email, otp, type }) => {
+    const record = await getOne(
+        `SELECT *
+         FROM otp_verifications
+         WHERE email = ?
+           AND otp = ?
+           AND type = ?
+           AND (is_used = 0 OR is_used IS NULL)
+           AND expires_at >= NOW()
+         ORDER BY id DESC
+         LIMIT 1`,
+        [email, otp, type]
+    );
+
+    if (!record) {
+        throw new AuthenticationError("Invalid or expired OTP");
+    }
+
+    await update("otp_verifications", { is_used: 1 }, { id: record.id });
+    return record;
+};
+
+router.post(
+    "/request-otp",
+    asyncHandler(async (req, res) => {
+        const { email, type = "register", name, password } = req.body || {};
+
+        if (!email) {
+            throw new ValidationError("Email is required");
+        }
+
+        const normalizedEmail = String(email).trim().toLowerCase();
+
+        if (type === "register") {
+            if (!name || String(name).trim().length < 2) {
+                throw new ValidationError("Name is required");
+            }
+
+            if (!password || String(password).length < 8) {
+                throw new ValidationError(
+                    "Password must be at least 8 characters long"
+                );
+            }
+
+            const existingUser = await getOne(
+                "SELECT id FROM users WHERE email = ? LIMIT 1",
+                [normalizedEmail]
+            );
+
+            if (existingUser) {
+                throw new ConflictError("An account with this email already exists");
+            }
+        }
+
+        const { otp } = await createOtpRecord({
+            email: normalizedEmail,
+            type,
         });
-    });
-}
 
-function registerAuthRoutes(app, { getPool, sendEmail }) {
-    app.post("/auth/send-login-otp", async (req, res) => {
-        try {
-            const { identifier } = req.body;
-            if (!identifier)
-                return res
-                    .status(400)
-                    .json({ error: "Email or phone is required" });
+        sendSuccess(
+            res,
+            {
+                email: normalizedEmail,
+                otpExpiresInMinutes: OTP_TTL_MINUTES,
+                devOtp: otp,
+            },
+            type === "password_reset"
+                ? "Password reset OTP sent successfully"
+                : "OTP sent successfully"
+        );
+    })
+);
 
-            const rawIdentifier = String(identifier).trim();
-            if (rawIdentifier.length < 3 || rawIdentifier.length > 120) {
-                return res.status(400).json({ error: "Invalid identifier" });
-            }
-            const isEmail = EMAIL_REGEX.test(rawIdentifier);
-            const normalizedIdentifier = isEmail
-                ? normalizeEmail(rawIdentifier)
-                : rawIdentifier;
+router.post(
+    "/register",
+    asyncHandler(async (req, res) => {
+        const { name, email, password, otp, phone = null, role = "customer" } =
+            req.body || {};
 
-            const [users] = await getPool().query(
-                `SELECT id, name, email, phone, role FROM users
-                 WHERE phone = ? OR LOWER(email) = LOWER(?)`,
-                [rawIdentifier, normalizedIdentifier]
-            );
-
-            if (!users.length) {
-                return res.status(404).json({ error: "User not found" });
-            }
-
-            const user = users[0];
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
-            const expires = new Date(Date.now() + 5 * 60 * 1000);
-
-            // Clean up any existing unused OTPs for this identifier
-            await getPool().query(
-                isEmail
-                    ? "DELETE FROM otp_verifications WHERE email = ? AND type = 'login' AND is_used = 0"
-                    : "DELETE FROM otp_verifications WHERE phone = ? AND type = 'login' AND is_used = 0",
-                [normalizedIdentifier]
-            );
-
-            // Insert new OTP into otp_verifications table
-            await getPool().query(
-                "INSERT INTO otp_verifications (email, phone, otp, type, user_id, expires_at, is_used) VALUES (?,?,?,?,?,?,0)",
-                [
-                    isEmail ? normalizedIdentifier : null,
-                    !isEmail ? normalizedIdentifier : null,
-                    otp,
-                    "login",
-                    user.id,
-                    expires,
-                ]
-            );
-
-            if (isEmail) {
-                try {
-                    const emailResult = await sendEmail(
-                        normalizedIdentifier,
-                        "Your TastieKit login code",
-                        `
-      <div style="font-family: 'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
-        <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
-          <div style="text-align:center;">
-            <h1 style="margin:0; color:#E53935;">TastieKit</h1>
-            <p style="color:#777; margin-top:6px;">Use the code below to sign in.</p>
-          </div>
-          <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
-          <h2 style="color:#333;">Sign in to your account</h2>
-          <p style="color:#555; line-height:1.6;">
-            Use the one-time login code below to continue.
-          </p>
-          <div style="text-align:center; margin:35px 0;">
-            <div style="display:inline-block; padding:18px 35px;
-                font-size:34px; letter-spacing:8px;
-                font-weight:bold;
-                color:#E53935;
-                background:#fff3f3;
-                border-radius:12px;">
-              ${otp}
-            </div>
-          </div>
-          <p style="font-size:14px; color:#777;">
-            This code is valid for 5 minutes.
-          </p>
-          <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
-          <p style="font-size:13px; color:#999;">
-            If you did not request this, please ignore this email.
-          </p>
-        </div>
-      </div>
-      `
-                    );
-
-                    if (emailResult.sent) {
-                        return res.json({
-                            ok: true,
-                            message: "OTP sent to your email address",
-                        });
-                    }
-
-                    // Email not configured – fall through to return OTP in response
-                    console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
-                    return res.json({
-                        ok: true,
-                        message: "Email not configured. Use the OTP below.",
-                        otp,
-                    });
-                } catch (emailErr) {
-                    console.warn("[OTP] Email send failed:", emailErr.message);
-                    console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
-                    return res.json({
-                        ok: true,
-                        message: "Email delivery failed. Use the OTP below.",
-                        otp,
-                    });
-                }
-            }
-
-            // Phone-based OTP – no email to send
-            console.log(`[OTP] Login OTP for ${normalizedIdentifier}: ${otp}`);
-            return res.json({ ok: true, message: "OTP sent successfully", otp });
-        } catch (err) {
-            console.error("Login OTP Error:", err);
-            res.status(500).json({
-                error: "Failed to send OTP",
-                detail: err.message,
-            });
+        if (!name || !email || !password || !otp) {
+            throw new ValidationError("Name, email, password and OTP are required");
         }
-    });
 
-    app.post("/auth/verify-login-otp", async (req, res) => {
-        try {
-            const { identifier, otp } = req.body;
-            if (!identifier || !otp)
-                return res
-                    .status(400)
-                    .json({ error: "Email/phone and OTP are required" });
-
-            const rawIdentifier = String(identifier).trim();
-            const normalizedOtp = normalizeOtp(otp);
-            if (normalizedOtp.length !== 6) {
-                return res.status(400).json({ error: "Invalid OTP format" });
-            }
-            const isEmail = EMAIL_REGEX.test(rawIdentifier);
-            const normalizedIdentifier = isEmail
-                ? normalizeEmail(rawIdentifier)
-                : rawIdentifier;
-
-            // Query otp_verifications table, check is_used = 0
-            const query = isEmail
-                ? `SELECT * FROM otp_verifications
-                 WHERE email = ?
-                 AND otp = ?
-                 AND type = 'login'
-                 AND is_used = 0
-                 AND expires_at > NOW()
-                 ORDER BY id DESC LIMIT 1`
-                : `SELECT * FROM otp_verifications
-                 WHERE phone = ?
-                 AND otp = ?
-                 AND type = 'login'
-                 AND is_used = 0
-                 AND expires_at > NOW()
-                 ORDER BY id DESC LIMIT 1`;
-            const [rows] = await getPool().query(query, [
-                normalizedIdentifier,
-                normalizedOtp,
-            ]);
-
-            if (!rows.length) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired OTP" });
-            }
-
-            const [users] = await getPool().query(
-                "SELECT id,name,email,phone,role FROM users WHERE id = ?",
-                [rows[0].user_id]
-            );
-
-            if (!users.length) {
-                return res.status(404).json({ error: "User not found" });
-            }
-
-            const user = users[0];
-
-            // Mark OTP as used instead of deleting
-            await getPool().query("UPDATE otp_verifications SET is_used = 1 WHERE id = ?", [
-                rows[0].id,
-            ]);
-
-            await createSession(req, user);
-
-            let restaurant = null;
-            let sessionToken = null;
-            if (user.role === "restaurant_partner") {
-                // 🔍 Check application status first
-                const [apps] = await getPool().query(
-                    "SELECT status FROM restaurant_applications WHERE owner_id = ? ORDER BY id DESC LIMIT 1",
-                    [user.id]
-                );
-
-                if (apps.length && apps[0].status === "pending") {
-                    return res.status(403).json({
-                        error: "Your application is still under review",
-                    });
-                }
-
-                // 🔍 Check approved restaurant
-                const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id]
-                );
-
-                if (!restaurants.length) {
-                    return res.status(403).json({
-                        error: "Your restaurant is not approved yet",
-                    });
-                }
-
-                restaurant = restaurants[0];
-
-                const crypto = require("crypto");
-                sessionToken = crypto.randomBytes(32).toString("hex");
-                await getPool().query(
-                    "INSERT INTO restaurant_sessions (user_id, token) VALUES (?, ?)",
-                    [user.id, sessionToken]
-                );
-            }
-
-            res.json({ user, restaurant, sessionToken });
-        } catch (err) {
-            console.error("Verify login OTP error:", err);
-            res.status(500).json({ error: "Failed to verify OTP" });
+        if (role !== "customer") {
+            throw new ValidationError("In-app registration is available only for customers");
         }
-    });
 
-    app.post("/auth/register-restaurant", async (req, res) => {
-        const conn = await getPool().getConnection();
+        const normalizedEmail = String(email).trim().toLowerCase();
+        await consumeOtpRecord({
+            email: normalizedEmail,
+            otp: String(otp).trim(),
+            type: "register",
+        });
 
-        try {
-            const {
-                ownerName,
-                phone,
-                email,
-                password,
-                confirmPassword,
-                name,
-                address,
-                city,
-                area,
-                pincode,
-                landmark,
-                cuisines,
-                openTime,
-                closeTime,
-                daysOpen,
-                fssai,
-                gst,
-                pan,
-                logo,
-            } = req.body;
+        const existingUser = await getOne(
+            "SELECT id FROM users WHERE email = ? LIMIT 1",
+            [normalizedEmail]
+        );
 
-            if (!ownerName || !phone || !name || !password) {
-                return res
-                    .status(400)
-                    .json({ error: "Required fields missing" });
-            }
-            if (!PASSWORD_POLICY_REGEX.test(password)) {
-                return res.status(400).json({
-                    error: "Password must be 8+ chars with uppercase, lowercase and number",
-                });
-            }
-            if (password !== confirmPassword) {
-                return res
-                    .status(400)
-                    .json({ error: "Passwords do not match" });
-            }
-
-            const normalizedPhone = phone.trim();
-            const normalizedEmail = email?.trim().toLowerCase() || null;
-            if (normalizedEmail && !EMAIL_REGEX.test(normalizedEmail)) {
-                return res.status(400).json({ error: "Invalid email format" });
-            }
-
-            const [existing] = await conn.query(
-                "SELECT id FROM users WHERE phone = ? OR email = ?",
-                [normalizedPhone, normalizedEmail]
-            );
-
-            if (existing.length) {
-                return res.status(400).json({ error: "User already exists" });
-            }
-
-            const hash = await bcrypt.hash(password, 10);
-
-            await conn.beginTransaction();
-
-            // 👤 create user
-            const [userResult] = await conn.query(
-                "INSERT INTO users (name, email, phone, password, role) VALUES (?,?,?,?,?)",
-                [
-                    ownerName,
-                    normalizedEmail,
-                    normalizedPhone,
-                    hash,
-                    "restaurant_partner",
-                ]
-            );
-
-            const userId = userResult.insertId;
-
-            // Check if user already has a pending application
-            const [existingApp] = await conn.query(
-                "SELECT id FROM restaurant_applications WHERE owner_id = ? AND status = 'pending'",
-                [userId]
-            );
-
-            if (existingApp.length) {
-                await conn.rollback();
-                return res.status(400).json({
-                    error: "You already have a pending application",
-                });
-            }
-
-            // 📝 create application
-            await conn.query(
-                `INSERT INTO restaurant_applications (
-    owner_id, owner_name, email, phone,
-    restaurant_name, address, city, pincode, landmark,
-    cuisines, open_time, close_time, days_open,
-    fssai, gst, pan, logo, status
-  )
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                [
-                    userId,
-                    ownerName,
-                    normalizedEmail,
-                    normalizedPhone,
-                    name, // frontend → restaurant_name
-                    address || null,
-                    city || null,
-                    pincode || null,
-                    landmark || null,
-                    JSON.stringify(cuisines || []),
-                    openTime ? `${openTime}:00` : null,
-                    closeTime ? `${closeTime}:00` : null,
-                    JSON.stringify(daysOpen || []),
-                    fssai || null,
-                    gst || null,
-                    pan || null,
-                    logo || null,
-                    "pending",
-                ]
-            );
-            await conn.commit();
-            await createSession(req, {
-                id: userId,
-                role: "restaurant_partner",
-            });
-
-            res.json({
-                message: "Application submitted. Wait for admin approval.",
-                user: {
-                    id: userId,
-                    name: ownerName,
-                    email: normalizedEmail,
-                    phone: normalizedPhone,
-                    role: "restaurant_partner",
-                },
-            });
-        } catch (err) {
-            await conn.rollback();
-            console.error(err);
-            res.status(500).json({ error: "Registration failed" });
-        } finally {
-            conn.release();
+        if (existingUser) {
+            throw new ConflictError("An account with this email already exists");
         }
-    });
-    app.get("/auth/application-status", async (req, res) => {
-        try {
-            const userId = req.headers.userid || req.session?.userId;
 
-            if (!userId) {
-                return res.status(401).json({ error: "Not authenticated" });
-            }
+        const userId = await insert("users", {
+            name: String(name).trim(),
+            email: normalizedEmail,
+            password: await hashPassword(password),
+            phone: phone || null,
+            role: "customer",
+            is_email_verified: 1,
+            is_available: 0,
+        });
 
-            const [apps] = await getPool().query(
-                `SELECT status, created_at 
-             FROM restaurant_applications 
-             WHERE owner_id = ? 
-             ORDER BY id DESC LIMIT 1`,
-                [userId]
-            );
+        const user = await getUserById(userId);
+        sendSuccess(
+            res,
+            createSessionPayload(user),
+            "Registration completed successfully",
+            201
+        );
+    })
+);
 
-            if (!apps.length) {
-                return res.json({ status: "none" });
-            }
+router.post(
+    "/login",
+    asyncHandler(async (req, res) => {
+        const { email, identifier, password } = req.body || {};
+        const lookup = String(identifier || email || "")
+            .trim()
+            .toLowerCase();
 
-            res.json(apps[0]);
-        } catch (err) {
-            res.status(500).json({ error: "Failed to fetch status" });
+        if (!lookup || !password) {
+            throw new ValidationError("Email and password are required");
         }
-    });
 
-    app.post("/auth/send-registration-otp", async (req, res) => {
-        try {
-            const { name, email, password } = req.body;
-            if (!name || !email || !password)
-                return res.status(400).json({ error: "All fields required" });
-            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
-                return res.status(400).json({ error: "Invalid email format" });
-            }
-            if (!PASSWORD_POLICY_REGEX.test(password)) {
-                return res.status(400).json({
-                    error: "Password must be 8+ chars with uppercase, lowercase and number",
-                });
-            }
-
-            const emailLower = normalizeEmail(email);
-
-            const [exists] = await getPool().query(
-                "SELECT id FROM users WHERE LOWER(email)=?",
-                [emailLower]
-            );
-
-            if (exists.length)
-                return res.status(400).json({ error: "Email already exists" });
-
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
-            const expires = new Date(Date.now() + 5 * 60 * 1000);
-
-            await getPool().query(
-                "DELETE FROM otp_verifications WHERE email = ? AND type = 'registration' AND is_used = 0",
-                [emailLower]
-            );
-
-            await getPool().query(
-                `INSERT INTO otp_verifications (email, otp, type, expires_at, is_used)
-                 VALUES (?, ?, ?, ?, 0)`,
-                [emailLower, otp, "registration", expires]
-            );
-
-            let emailSent = false;
-            try {
-                const emailResult = await sendEmail(
-                    emailLower,
-                    "Verify Your TastieKit Account",
-                    `
-  <div style="font-family: 'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
-    <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
-      
-      <div style="text-align:center;">
-        <h1 style="margin:0; color:#E53935;">TastieKit</h1>
-        <p style="color:#777; margin-top:6px;">Delicious food delivered fast</p>
-      </div>
-
-      <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
-
-      <h2 style="color:#333;">Verify Your Account</h2>
-
-      <p style="color:#555; line-height:1.6;">
-        Welcome to TastieKit! Use the OTP below to verify your account.
-      </p>
-
-      <div style="text-align:center; margin:35px 0;">
-        <div style="display:inline-block; padding:18px 35px;
-            font-size:34px; letter-spacing:8px;
-            font-weight:bold;
-            color:#E53935;
-            background:#fff3f3;
-            border-radius:12px;">
-          ${otp}
-        </div>
-      </div>
-
-      <p style="font-size:14px; color:#777;">
-        This OTP is valid for 5 minutes.
-      </p>
-
-      <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
-
-      <p style="font-size:13px; color:#999;">
-        If you did not request this, please ignore this email.
-      </p>
-
-      <p style="font-size:12px; color:#bbb; text-align:center; margin-top:20px;">
-        Copyright ${new Date().getFullYear()} TastieKit. All rights reserved.
-      </p>
-
-    </div>
-  </div>
-  `
-                );
-                emailSent = emailResult.sent;
-            } catch (emailError) {
-                console.warn("[OTP] Registration email failed:", emailError.message);
-            }
-
-            res.json({
-                ok: true,
-                message: emailSent
-                    ? "OTP sent to your email"
-                    : "If email delivery is unavailable, please contact support.",
-            });
-        } catch (err) {
-            console.error("Registration OTP Error:", err);
-            res.status(500).json({
-                error: "Failed to send OTP",
-                detail: err.message,
-            });
+        const user = await getUserByIdentifier(lookup);
+        if (!user) {
+            throw new AuthenticationError("Invalid credentials");
         }
-    });
 
-    app.post("/auth/register", async (req, res) => {
-        try {
-            const { email, otp } = req.body;
-            if (!email || !otp) {
-                return res.status(400).json({ error: "Email and OTP are required" });
-            }
-            const emailLower = normalizeEmail(email);
-            const normalizedOtp = normalizeOtp(otp);
-            if (!EMAIL_REGEX.test(emailLower)) {
-                return res.status(400).json({ error: "Invalid email format" });
-            }
-            if (normalizedOtp.length !== 6) {
-                return res.status(400).json({ error: "Invalid OTP format" });
-            }
-
-            const [rows] = await getPool().query(
-                `SELECT * FROM otp_verifications
-             WHERE email=? AND otp=? AND type='registration' AND is_used=0 AND expires_at > NOW()
-              ORDER BY id DESC LIMIT 1`,
-                [emailLower, normalizedOtp]
-            );
-
-            if (!rows.length) {
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired OTP" });
-            }
-
-            // Get registration data from session
-            const tempData = req.session.tempRegistration;
-            if (!tempData || !tempData.name || !tempData.password) {
-                return res
-                    .status(400)
-                    .json({ error: "Registration session expired. Please register again." });
-            }
-
-            const [result] = await getPool().query(
-                "INSERT INTO users (name,email,password,role) VALUES (?,?,?,?)",
-                [tempData.name, emailLower, tempData.password, "customer"]
-            );
-
-            await createSession(req, { id: result.insertId, role: "customer" });
-
-            // Mark OTP as used
-            await getPool().query("UPDATE otp_verifications SET is_used=1 WHERE id=?", [
-                rows[0].id,
-            ]);
-
-            // Clear temp registration data from session
-            delete req.session.tempRegistration;
-
-            res.json({
-                user: {
-                    id: result.insertId,
-                    name: tempData.name,
-                    email: emailLower,
-                    role: "customer",
-                },
-            });
-        } catch (err) {
-            console.error("Registration error:", err);
-            res.status(500).json({ error: "Registration failed" });
+        const isValidPassword = await verifyPassword(password, user.password);
+        if (!isValidPassword) {
+            throw new AuthenticationError("Invalid credentials");
         }
-    });
 
-    app.post("/auth/login", async (req, res) => {
-        try {
-            const { email, password } = req.body;
-            if (!email || !password) {
-                return res
-                    .status(400)
-                    .json({ error: "Email and password are required" });
-            }
-            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
-                return res.status(400).json({ error: "Invalid email format" });
-            }
-            console.log("Login attempt for:", email);
+        sendSuccess(res, createSessionPayload(user), "Login successful");
+    })
+);
 
-            console.log("Executing database query...");
-            const [rows] = await getPool().query(
-                "SELECT id,name,email,phone,role,password FROM users WHERE LOWER(email)=LOWER(?)",
-                [email]
-            );
+router.post(
+    "/refresh-token",
+    asyncHandler(async (req, res) => {
+        const { refreshToken } = req.body || {};
 
-            console.log("Query completed, found users:", rows.length);
-            const user = rows[0];
-            if (!user) {
-                console.log("No user found for:", email);
-                return res.status(404).json({ error: "User not found" });
-            }
-
-            const ok = await bcrypt.compare(password, user.password);
-            if (!ok) {
-                console.log("Password mismatch for:", email);
-                return res.status(400).json({ error: "Invalid credentials" });
-            }
-
-            delete user.password;
-            await createSession(req, user);
-
-            let restaurant = null;
-            let sessionToken = null;
-
-            if (user.role === "restaurant_partner") {
-                // 🔍 Check application status first
-                const [apps] = await getPool().query(
-                    "SELECT status FROM restaurant_applications WHERE owner_id = ? ORDER BY id DESC LIMIT 1",
-                    [user.id]
-                );
-
-                if (apps.length && apps[0].status === "pending") {
-                    return res.status(403).json({
-                        error: "Your application is still under review",
-                    });
-                }
-
-                // 🔍 Check approved restaurant
-                const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id]
-                );
-
-                if (!restaurants.length) {
-                    return res.status(403).json({
-                        error: "Your restaurant is not approved yet",
-                    });
-                }
-
-                restaurant = restaurants[0];
-
-                const crypto = require("crypto");
-                sessionToken = crypto.randomBytes(32).toString("hex");
-                await getPool().query(
-                    "INSERT INTO restaurant_sessions (user_id, token) VALUES (?, ?)",
-                    [user.id, sessionToken]
-                );
-            }
-
-            console.log("Login successful for:", email);
-            res.json({ user, restaurant, sessionToken });
-        } catch (err) {
-            console.error("Login error:", err.message);
-            console.error("Stack:", err.stack);
-            res.status(500).json({ error: "Server error" });
+        if (!refreshToken) {
+            throw new ValidationError("Refresh token is required");
         }
-    });
 
-    app.post("/auth/send-reset-otp", async (req, res) => {
-        try {
-            const { email } = req.body;
-            if (!email)
-                return res.status(400).json({ error: "Email required" });
-            if (!EMAIL_REGEX.test(normalizeEmail(email))) {
-                return res.status(400).json({ error: "Invalid email format" });
-            }
+        const decoded = verifyRefreshToken(refreshToken);
+        const user = await getUserById(decoded.userId || decoded.sub);
 
-            const emailLower = normalizeEmail(email);
-
-            const [users] = await getPool().query(
-                "SELECT id FROM users WHERE LOWER(email)=?",
-                [emailLower]
-            );
-
-            if (!users.length)
-                return res.status(400).json({ error: "Account not found" });
-
-            const otp = Math.floor(100000 + Math.random() * 900000).toString();
-            const expires = new Date(Date.now() + 5 * 60 * 1000);
-
-            await getPool().query(
-                "DELETE FROM otp_verifications WHERE email = ? AND type = 'reset' AND is_used = 0",
-                [emailLower]
-            );
-
-            await getPool().query(
-                "INSERT INTO otp_verifications (email, otp, type, user_id, expires_at, is_used) VALUES (?,?,?,?,?,0)",
-                [emailLower, otp, "reset", users[0].id, expires]
-            );
-
-            let emailSent = false;
-            try {
-                const emailResult = await sendEmail(
-                    emailLower,
-                    "Reset Your TastieKit Password",
-                    `
-  <div style="font-family:'Segoe UI', Arial; background:#f4f6fb; padding:40px 20px;">
-    <div style="max-width:520px; margin:auto; background:#ffffff; padding:35px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.08);">
-
-      <div style="text-align:center;">
-        <h1 style="margin:0; color:#4CAF50;">Password Reset</h1>
-      </div>
-
-      <hr style="margin:25px 0; border:none; border-top:1px solid #eee;" />
-
-      <p style="color:#555; line-height:1.6;">
-        We received a request to reset your TastieKit password.
-      </p>
-
-      <div style="text-align:center; margin:35px 0;">
-        <div style="display:inline-block; padding:18px 35px; 
-            font-size:34px; letter-spacing:8px; 
-            font-weight:bold; 
-            color:#4CAF50; 
-            background:#e8f5e9; 
-            border-radius:12px;">
-          ${otp}
-        </div>
-      </div>
-
-      <p style="font-size:14px; color:#777;">
-        This OTP will expire in 5 minutes.
-      </p>
-
-      <p style="font-size:13px; color:#999;">
-        If you didn't request this reset, your account is still secure.
-      </p>
-
-      <p style="font-size:12px; color:#bbb; text-align:center; margin-top:20px;">
-        Copyright ${new Date().getFullYear()} TastieKit
-      </p>
-
-    </div>
-  </div>
-  `
-                );
-                emailSent = emailResult.sent;
-            } catch (emailError) {
-                console.warn("[OTP] Reset email failed:", emailError.message);
-            }
-
-            res.json({
-                ok: true,
-                message: emailSent
-                    ? "OTP sent to your email"
-                    : "If email delivery is unavailable, please contact support.",
-            });
-        } catch (err) {
-            console.error("Forgot Password OTP Error:", err);
-            res.status(500).json({
-                error: "Failed to send OTP",
-                detail: err.message,
-            });
+        if (!user) {
+            throw new AuthenticationError("User not found");
         }
-    });
 
-    app.post("/auth/logout", async (req, res) => {
-        if (req.session) {
-            req.session.destroy();
+        sendSuccess(res, createSessionPayload(user), "Session refreshed successfully");
+    })
+);
+
+router.post(
+    "/logout",
+    authenticate,
+    asyncHandler(async (req, res) => {
+        sendSuccess(res, { loggedOut: true }, "Logged out successfully");
+    })
+);
+
+router.get(
+    "/me",
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const user = await getUserById(req.user.id);
+        sendSuccess(res, sanitizeUser(user), "Profile fetched successfully");
+    })
+);
+
+router.put(
+    "/me",
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const { name, phone, profile_image, profile_image_public_id } =
+            req.body || {};
+
+        const updates = {};
+        if (name !== undefined) updates.name = String(name).trim();
+        if (phone !== undefined) updates.phone = phone || null;
+        if (profile_image !== undefined) updates.profile_image = profile_image || null;
+        if (profile_image_public_id !== undefined) {
+            updates.profile_image_public_id = profile_image_public_id || null;
         }
-        res.json({ ok: true, message: "Logged out successfully" });
-    });
 
-    app.get("/auth/me", async (req, res) => {
-        try {
-            const userId = req.headers.userid || req.session?.userId;
-            if (!userId) {
-                return res.status(401).json({ error: "Not authenticated" });
-            }
-
-            const [users] = await getPool().query(
-                "SELECT id, name, email, phone, role FROM users WHERE id = ?",
-                [userId]
-            );
-
-            if (!users.length) {
-                return res.status(401).json({ error: "User not found" });
-            }
-
-            const user = users[0];
-            let restaurant = null;
-            if (user.role === "restaurant_partner") {
-                const [restaurants] = await getPool().query(
-                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id]
-                );
-                restaurant = restaurants[0] || null;
-            }
-
-            res.json({ user, restaurant });
-        } catch (err) {
-            console.error("Auth me error:", err);
-            res.status(500).json({ error: "Server error" });
+        if (Object.keys(updates).length) {
+            await update("users", updates, { id: req.user.id });
         }
-    });
 
-    app.get("/auth/test-email", async (req, res) => {
-        try {
-            if (process.env.NODE_ENV === "production") {
-                return res.status(404).json({ error: "Not found" });
-            }
-            await sendEmail(
-                "tastiekitdelivers@gmail.com",
-                "Brevo Test",
-                "<h2>Brevo is working</h2>"
-            );
+        const user = await getUserById(req.user.id);
+        sendSuccess(res, sanitizeUser(user), "Profile updated successfully");
+    })
+);
 
-            res.json({ success: true });
-        } catch (err) {
-            res.status(500).json({ error: err.message });
+router.post(
+    "/request-password-reset",
+    asyncHandler(async (req, res) => {
+        const { email } = req.body || {};
+
+        if (!email) {
+            throw new ValidationError("Email is required");
         }
-    });
 
-    app.post("/auth/verify-otp", async (req, res) => {
-        try {
-            const { email, otp } = req.body;
-            const emailLower = normalizeEmail(email);
-            const normalizedOtp = normalizeOtp(otp);
-            if (normalizedOtp.length !== 6) {
-                return res.status(400).json({ error: "Invalid OTP format" });
-            }
+        const normalizedEmail = String(email).trim().toLowerCase();
+        const user = await getOne(
+            "SELECT id FROM users WHERE email = ? LIMIT 1",
+            [normalizedEmail]
+        );
 
-            const [rows] = await getPool().query(
-                "SELECT * FROM otp_verifications WHERE email=? AND otp=? AND type='reset' AND is_used=0 AND expires_at > NOW() ORDER BY id DESC LIMIT 1",
-                [emailLower, normalizedOtp]
-            );
-
-            if (!rows.length)
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired OTP" });
-
-            const resetToken = Math.random().toString(36).substring(2);
-            const resetExpires = new Date(Date.now() + 10 * 60 * 1000);
-
-            // Create entry in password_resets table
-            await getPool().query(
-                "INSERT INTO password_resets (user_id, email, otp, reset_token, reset_expires) VALUES (?,?,?,?,?)",
-                [rows[0].user_id, emailLower, normalizedOtp, resetToken, resetExpires]
-            );
-
-            // Mark OTP as used
-            await getPool().query(
-                "UPDATE otp_verifications SET is_used=1 WHERE id=?",
-                [rows[0].id]
-            );
-
-            res.json({ ok: true, resetToken });
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: "OTP verification failed" });
+        if (!user) {
+            throw new AuthenticationError("No account found with this email");
         }
-    });
 
-    app.post("/auth/reset-password", async (req, res) => {
-        try {
-            const { email, resetToken, newPassword } = req.body;
-            if (!PASSWORD_POLICY_REGEX.test(newPassword || "")) {
-                return res.status(400).json({
-                    error: "Password must be 8+ chars with uppercase, lowercase and number",
-                });
-            }
-            const emailLower = normalizeEmail(email);
+        const { otp } = await createOtpRecord({
+            email: normalizedEmail,
+            type: "password_reset",
+        });
 
-            const [rows] = await getPool().query(
-                "SELECT * FROM password_resets WHERE email=? AND reset_token=? ORDER BY id DESC LIMIT 1",
-                [emailLower, resetToken]
+        sendSuccess(
+            res,
+            {
+                email: normalizedEmail,
+                otpExpiresInMinutes: OTP_TTL_MINUTES,
+                devOtp: otp,
+            },
+            "Password reset OTP sent successfully"
+        );
+    })
+);
+
+router.post(
+    "/verify-otp",
+    asyncHandler(async (req, res) => {
+        const { email, otp, type = "password_reset" } = req.body || {};
+
+        if (!email || !otp) {
+            throw new ValidationError("Email and OTP are required");
+        }
+
+        const normalizedEmail = String(email).trim().toLowerCase();
+        await consumeOtpRecord({
+            email: normalizedEmail,
+            otp: String(otp).trim(),
+            type,
+        });
+
+        if (type === "password_reset") {
+            const resetToken = jwt.sign(
+                { email: normalizedEmail, type: "password_reset" },
+                RESET_TOKEN_SECRET,
+                { expiresIn: "15m" }
             );
 
-            if (!rows.length || new Date(rows[0].reset_expires) < new Date())
-                return res
-                    .status(400)
-                    .json({ error: "Invalid or expired token" });
-
-            const hash = await bcrypt.hash(newPassword, 10);
-
-            await getPool().query("UPDATE users SET password=? WHERE id=?", [
-                hash,
-                rows[0].user_id,
-            ]);
-
-            await getPool().query("DELETE FROM password_resets WHERE email=?", [
-                emailLower,
-            ]);
-
-            res.json({ ok: true, message: "Password reset successfully" });
-        } catch (err) {
-            console.error("Reset failed error:", err);
-            res.status(500).json({ error: "Reset failed" });
+            sendSuccess(res, { resetToken }, "OTP verified successfully");
+            return;
         }
-    });
 
-    app.get("/test-email", async (req, res) => {
-        try {
-            if (process.env.NODE_ENV === "production") {
-                return res.status(404).json({ error: "Not found" });
-            }
-            await sendEmail(
-                "tastiekit@gmail.com",
-                "Brevo Test",
-                "<h2>Brevo is working</h2>"
+        sendSuccess(res, { verified: true }, "OTP verified successfully");
+    })
+);
+
+router.post(
+    "/reset-password",
+    asyncHandler(async (req, res) => {
+        const { email, resetToken, newPassword } = req.body || {};
+
+        if (!email || !resetToken || !newPassword) {
+            throw new ValidationError(
+                "Email, reset token and new password are required"
             );
-
-            res.json({ success: true });
-        } catch (err) {
-            res.status(500).json({ error: err.message });
         }
-    });
-}
 
-module.exports = registerAuthRoutes;
+        const normalizedEmail = String(email).trim().toLowerCase();
+        const decoded = jwt.verify(resetToken, RESET_TOKEN_SECRET);
+
+        if (
+            decoded.type !== "password_reset" ||
+            decoded.email !== normalizedEmail
+        ) {
+            throw new AuthenticationError("Invalid reset token");
+        }
+
+        const user = await getOne(
+            "SELECT id FROM users WHERE email = ? LIMIT 1",
+            [normalizedEmail]
+        );
+
+        if (!user) {
+            throw new AuthenticationError("User not found");
+        }
+
+        await update(
+            "users",
+            {
+                password: await hashPassword(newPassword),
+            },
+            { id: user.id }
+        );
+
+        sendSuccess(res, { reset: true }, "Password reset successfully");
+    })
+);
+
+export default router;

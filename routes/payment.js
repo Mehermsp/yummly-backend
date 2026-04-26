@@ -2,6 +2,6 @@ import express from "express";
 
 const router = express.Router();
 
-// Restaurant endpoints
+// Payment endpoints
 
 export default router;

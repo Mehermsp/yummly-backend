@@ -131,12 +131,12 @@ async function ensureColumns() {
 
         // Menu items columns
         await ensureColumn(
-            "menu_items",
+            "menu",
             "meal_type",
             "meal_type VARCHAR(30) NOT NULL DEFAULT 'Lunch'"
         );
         await ensureColumn(
-            "menu_items",
+            "menu",
             "is_available",
             "is_available TINYINT(1) NOT NULL DEFAULT 1"
         );
@@ -144,6 +144,11 @@ async function ensureColumns() {
             "menu_items",
             "image_public_id",
             "image_public_id VARCHAR(255) DEFAULT NULL"
+        );
+        await ensureColumn(
+            "otp_codes",
+            "reset_expires",
+            "reset_expires TIMESTAMP NULL DEFAULT NULL"
         );
 
         // Orders columns
@@ -296,6 +301,7 @@ async function createSchema() {
         CREATE TABLE IF NOT EXISTS restaurants (
             id INT AUTO_INCREMENT PRIMARY KEY,
             owner_id INT NOT NULL,
+            user_id INT,
             name VARCHAR(255) NOT NULL,
             description TEXT,
             logo LONGTEXT,
@@ -411,10 +417,29 @@ async function createSchema() {
         )
     `);
 
-    // Legacy menu table removed - use menu_items instead
-    // await pool.query(`
-    //     CREATE TABLE IF NOT EXISTS menu (...)
-    // `);
+    // Old menu table for backward compatibility
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS menu (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            description TEXT,
+            price DECIMAL(10,2) NOT NULL DEFAULT 0,
+            image VARCHAR(1024),
+            category VARCHAR(50) DEFAULT 'Veg',
+            meal_type VARCHAR(30) NOT NULL DEFAULT 'Lunch',
+            season VARCHAR(50) DEFAULT 'All',
+            rating DECIMAL(3,1) DEFAULT 4.0,
+            discount INT DEFAULT 0,
+            popularity INT DEFAULT 0,
+            available TINYINT(1) NOT NULL DEFAULT 1,
+            is_available TINYINT(1) NOT NULL DEFAULT 1,
+            restaurant_id INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+            KEY idx_available (available),
+            KEY idx_restaurant_id (restaurant_id)
+        )
+    `);
 
     // Orders table
     await pool.query(`
@@ -445,6 +470,8 @@ async function createSchema() {
             pincode VARCHAR(20),
             estimated_delivery_time TIMESTAMP NULL,
             actual_delivery_time TIMESTAMP NULL,
+            delivery_boy VARCHAR(255),
+            driver VARCHAR(255),
             delivered_at TIMESTAMP NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -551,25 +578,25 @@ async function createSchema() {
     }
 
     // OTP codes table
-//     await pool.query(`
-//         CREATE TABLE IF NOT EXISTS otp_codes (
-//             id INT AUTO_INCREMENT PRIMARY KEY,
-//             user_id INT,
-//             email VARCHAR(255),
-//             phone VARCHAR(50),
-//             otp VARCHAR(20),
-//             type VARCHAR(50),
-//             reset_token VARCHAR(255),
-//             reset_expires TIMESTAMP NULL,
-//             temp_name VARCHAR(255),
-//             temp_password VARCHAR(255),
-//             expires_at TIMESTAMP,
-//             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-//             KEY idx_email (email),
-//             KEY idx_expires_at (expires_at)
-//         )
-//     `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS otp_codes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            email VARCHAR(255),
+            phone VARCHAR(50),
+            otp VARCHAR(20),
+            type VARCHAR(50),
+            reset_token VARCHAR(255),
+            reset_expires TIMESTAMP NULL,
+            temp_name VARCHAR(255),
+            temp_password VARCHAR(255),
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+            KEY idx_email (email),
+            KEY idx_expires_at (expires_at)
+        )
+    `);
 
     // OTP verifications table
     await pool.query(`
@@ -589,21 +616,21 @@ async function createSchema() {
     `);
 
     // OTPs table (legacy)
-//     await pool.query(`
-//         CREATE TABLE IF NOT EXISTS otps (
-//             id INT AUTO_INCREMENT PRIMARY KEY,
-//             user_id INT,
-//             name VARCHAR(255),
-//             email VARCHAR(255),
-//             otp VARCHAR(20),
-//             password VARCHAR(255),
-//             reset_token VARCHAR(255),
-//             reset_expires TIMESTAMP NULL,
-//             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//             expires_at TIMESTAMP,
-//             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-//         )
-//     `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS otps (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            name VARCHAR(255),
+            email VARCHAR(255),
+            otp VARCHAR(20),
+            password VARCHAR(255),
+            reset_token VARCHAR(255),
+            reset_expires TIMESTAMP NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+    `);
 
     // Password resets table
     await pool.query(`
@@ -676,18 +703,18 @@ async function createSchema() {
     `);
 
     // Vendors table
-//     await pool.query(`
-//         CREATE TABLE IF NOT EXISTS vendors (
-//             vendor_id INT AUTO_INCREMENT PRIMARY KEY,
-//             restaurant_name VARCHAR(255),
-//             email VARCHAR(255) UNIQUE,
-//             phone VARCHAR(30),
-//             logo_url VARCHAR(1024),
-//             password_hash VARCHAR(255),
-//             is_online TINYINT(1) DEFAULT 0,
-//             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-//         )
-//     `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendors (
+            vendor_id INT AUTO_INCREMENT PRIMARY KEY,
+            restaurant_name VARCHAR(255),
+            email VARCHAR(255) UNIQUE,
+            phone VARCHAR(30),
+            logo_url VARCHAR(1024),
+            password_hash VARCHAR(255),
+            is_online TINYINT(1) DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
 
     console.log("✓ Database schema initialized successfully");
 }

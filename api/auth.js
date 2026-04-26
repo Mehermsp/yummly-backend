@@ -114,8 +114,8 @@ module.exports = function registerAuthRoutes(getPool) {
                 // Fetch approved restaurant
                 const restaurant = await queryOne(
                     getPool(),
-                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
-                    [user.id]
+                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
+                    [user.id, user.id]
                 );
                 if (!restaurant) {
                     throw new HttpError(403, "Your restaurant is not approved yet");
@@ -172,8 +172,8 @@ module.exports = function registerAuthRoutes(getPool) {
             if (user.role === USER_ROLES.RESTAURANT) {
                 const restaurant = await queryOne(
                     getPool(),
-                    "SELECT * FROM restaurants WHERE owner_id = ? ORDER BY id ASC LIMIT 1",
-                    [userId]
+                    "SELECT * FROM restaurants WHERE owner_id = ? OR user_id = ? ORDER BY id ASC LIMIT 1",
+                    [userId, userId]
                 );
                 return sendOk(res, { user: sanitized, restaurant: restaurant || null });
             }
