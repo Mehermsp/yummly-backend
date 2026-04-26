@@ -6,6 +6,7 @@ import {
     getDeliveryOpenOrders,
     getDeliveryPartnerStats,
     getOrderById,
+    getOrderItems,
     listDeliveryAssignments,
     updateAssignmentStatus,
     updateOrderStatus,
@@ -34,13 +35,10 @@ export const getDeliveryDashboard = asyncHandler(async (req, res) => {
 
 export const getDeliveryOrders = asyncHandler(async (req, res) => {
     const assignments = await listDeliveryAssignments(req.user.id);
-    // Also fetch assigned orders with items
     const ordersWithItems = await Promise.all(
         assignments.map(async (assignment) => {
             const order = await getOrderById(assignment.order_id);
-            const items = await import("../models/orderModel.js").then((m) =>
-                m.getOrderItems(assignment.order_id)
-            );
+            const items = await getOrderItems(assignment.order_id);
             return { ...assignment, ...order, items };
         })
     );
@@ -86,13 +84,26 @@ export const acceptDeliveryOrder = asyncHandler(async (req, res) => {
         throw new AppError(404, "Ready-for-pickup order not found");
     }
 
-    try {
-        await createDeliveryAssignment({
+    const existingAssignments = await listDeliveryAssignments(req.user.id);
+    const existing = existingAssignments.find(
+        (assignment) => String(assignment.order_id) === String(order.id)
+    );
+
+    if (existing) {
+        await updateAssignmentStatus({
             orderId: order.id,
             deliveryPartnerId: req.user.id,
+            status: DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
         });
-    } catch (error) {
-        throw new AppError(409, error.message);
+    } else {
+        try {
+            await createDeliveryAssignment({
+                orderId: order.id,
+                deliveryPartnerId: req.user.id,
+            });
+        } catch (error) {
+            throw new AppError(409, error.message);
+        }
     }
 
     sendSuccess(res, null, "Delivery assignment accepted");
@@ -110,6 +121,10 @@ export const rejectDeliveryOrder = asyncHandler(async (req, res) => {
 
 export const pickupDeliveryOrder = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.params.orderId);
+    if (!order || order.delivery_partner_id !== req.user.id) {
+        throw new AppError(404, "Order not found or not assigned to you");
+    }
+
     await updateAssignmentStatus({
         orderId: req.params.orderId,
         deliveryPartnerId: req.user.id,
@@ -129,6 +144,10 @@ export const pickupDeliveryOrder = asyncHandler(async (req, res) => {
 
 export const completeDeliveryOrder = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.params.orderId);
+    if (!order || order.delivery_partner_id !== req.user.id) {
+        throw new AppError(404, "Order not found or not assigned to you");
+    }
+
     await updateAssignmentStatus({
         orderId: req.params.orderId,
         deliveryPartnerId: req.user.id,

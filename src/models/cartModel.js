@@ -25,6 +25,17 @@ export const getCartForUser = async (userId) =>
         [userId]
     );
 
+export const getCartItemById = async (userId, cartItemId) =>
+    getOne(
+        `
+        SELECT *
+        FROM cart_items
+        WHERE id = ? AND user_id = ?
+        LIMIT 1
+        `,
+        [cartItemId, userId]
+    );
+
 export const findMenuItemForCart = async (menuItemId) =>
     getOne(
         `
@@ -88,3 +99,6 @@ export const removeCartItem = async (userId, cartItemId) =>
         cartItemId,
         userId,
     ]);
+
+export const clearCart = async (userId) =>
+    query(`DELETE FROM cart_items WHERE user_id = ?`, [userId]);

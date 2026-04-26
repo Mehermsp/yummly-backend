@@ -1,13 +1,62 @@
 import { getOne, query } from "../config/db.js";
 
-export const listApprovedRestaurants = async ({ limit, offset, search }) => {
+const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
+    const filters = ["restaurant_id = ?", "is_deleted = 0"];
+    const params = [];
+
+    if (!includeUnavailable) {
+        filters.push("is_available = 1");
+    }
+
+    if (category) {
+        filters.push("category = ?");
+        params.push(category);
+    }
+
+    if (search) {
+        filters.push("(name LIKE ? OR description LIKE ? OR category LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    return {
+        whereClause: filters.join(" AND "),
+        params,
+    };
+};
+
+export const listApprovedRestaurants = async ({
+    limit,
+    offset,
+    search,
+    city,
+    sort = "rating",
+}) => {
     const filters = ["r.is_active = 1"];
     const params = [];
 
     if (search) {
-        filters.push("(r.name LIKE ? OR r.city LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`);
+        filters.push(
+            "(r.name LIKE ? OR r.city LIKE ? OR r.landmark LIKE ? OR r.cuisines LIKE ?)"
+        );
+        params.push(
+            `%${search}%`,
+            `%${search}%`,
+            `%${search}%`,
+            `%${search}%`
+        );
     }
+
+    if (city) {
+        filters.push("r.city = ?");
+        params.push(city);
+    }
+
+    const sortClause =
+        sort === "newest"
+            ? "r.created_at DESC"
+            : sort === "orders"
+            ? "r.total_orders DESC, r.rating DESC"
+            : "r.rating DESC, r.total_orders DESC, r.created_at DESC";
 
     const whereClause = filters.join(" AND ");
     const items = await query(
@@ -18,15 +67,22 @@ export const listApprovedRestaurants = async ({ limit, offset, search }) => {
             r.description,
             r.city,
             r.state,
+            r.landmark AS area,
+            r.landmark,
+            r.address,
+            r.pincode,
             r.logo_url,
             r.cover_image_url,
+            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
             r.rating,
             r.total_orders,
             r.cuisines,
-            r.is_open
+            r.is_open,
+            r.open_time,
+            r.close_time
         FROM restaurants r
         WHERE ${whereClause}
-        ORDER BY r.is_open DESC, r.rating DESC, r.created_at DESC
+        ORDER BY r.is_open DESC, ${sortClause}
         LIMIT ? OFFSET ?
         `,
         [...params, limit, offset]
@@ -44,6 +100,10 @@ export const getRestaurantById = async (restaurantId) =>
         `
         SELECT
             r.*,
+            r.landmark AS area,
+            r.logo_url AS logo,
+            r.cover_image_url AS cover_image,
+            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
             u.name AS owner_name,
             u.phone AS owner_phone
         FROM restaurants r
@@ -54,8 +114,17 @@ export const getRestaurantById = async (restaurantId) =>
         [restaurantId]
     );
 
-export const getRestaurantMenu = async (restaurantId) =>
-    query(
+export const getRestaurantMenu = async (
+    restaurantId,
+    { includeUnavailable = true, category, search } = {}
+) => {
+    const { whereClause, params } = buildMenuFilters({
+        includeUnavailable,
+        category,
+        search,
+    });
+
+    return query(
         `
         SELECT
             id,
@@ -74,11 +143,16 @@ export const getRestaurantMenu = async (restaurantId) =>
             rating,
             popularity
         FROM menu_items
-        WHERE restaurant_id = ? AND is_deleted = 0
-        ORDER BY category ASC, name ASC
+        WHERE ${whereClause}
+        ORDER BY
+            CASE WHEN category IS NULL OR category = '' THEN 1 ELSE 0 END,
+            category ASC,
+            popularity DESC,
+            name ASC
         `,
-        [restaurantId]
+        [restaurantId, ...params]
     );
+};
 
 export const createRestaurantApplication = async (payload) => {
     const result = await query(
@@ -104,7 +178,7 @@ export const createRestaurantApplication = async (payload) => {
         `,
         [
             payload.ownerId,
-            payload.restaurantName,
+            payload.restaurantName || payload.restaurant_name,
             payload.email,
             payload.phone,
             payload.address,
@@ -113,12 +187,12 @@ export const createRestaurantApplication = async (payload) => {
             payload.pincode,
             payload.landmark || null,
             JSON.stringify(payload.cuisines || []),
-            payload.openTime,
-            payload.closeTime,
-            JSON.stringify(payload.daysOpen || []),
-            payload.fssaiNumber || null,
-            payload.gstNumber || null,
-            payload.panNumber || null,
+            payload.openTime || payload.open_time,
+            payload.closeTime || payload.close_time,
+            JSON.stringify(payload.daysOpen || payload.days_open || []),
+            payload.fssaiNumber || payload.fssai || payload.fssai_number || null,
+            payload.gstNumber || payload.gst || payload.gst_number || null,
+            payload.panNumber || payload.pan || payload.pan_number || null,
         ]
     );
 
@@ -140,7 +214,12 @@ export const getActiveApplicationByOwner = async (ownerId) =>
 export const getRestaurantByOwnerId = async (ownerId) =>
     getOne(
         `
-        SELECT *
+        SELECT
+            *,
+            landmark AS area,
+            logo_url AS logo,
+            cover_image_url AS cover_image,
+            COALESCE(cover_image_url, logo_url) AS image_url
         FROM restaurants
         WHERE owner_id = ?
         LIMIT 1
@@ -162,21 +241,30 @@ export const createMenuItem = async (restaurantId, payload) => {
             meal_type,
             food_type,
             preparation_time_mins,
-            image_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            image_url,
+            is_available
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
             restaurantId,
             payload.name,
             payload.description || null,
             payload.price,
-            payload.discountPercent || 0,
+            payload.discountPercent ??
+                payload.discount_percent ??
+                payload.discount ??
+                0,
             payload.category || null,
-            payload.cuisineType || null,
-            payload.mealType || "lunch",
-            payload.foodType || "vegetarian",
-            payload.preparationTimeMins || 20,
-            payload.imageUrl || null,
+            payload.cuisineType || payload.cuisine_type || null,
+            payload.mealType || payload.meal_type || "lunch",
+            payload.foodType || payload.food_type || "vegetarian",
+            payload.preparationTimeMins ||
+                payload.preparation_time_mins ||
+                20,
+            payload.imageUrl || payload.image_url || null,
+            payload.isAvailable === false || Number(payload.is_available) === 0
+                ? 0
+                : 1,
         ]
     );
 
@@ -205,14 +293,21 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             payload.name,
             payload.description || null,
             payload.price,
-            payload.discountPercent || 0,
+            payload.discountPercent ??
+                payload.discount_percent ??
+                payload.discount ??
+                0,
             payload.category || null,
-            payload.cuisineType || null,
-            payload.mealType || "lunch",
-            payload.foodType || "vegetarian",
-            payload.preparationTimeMins || 20,
-            payload.imageUrl || null,
-            payload.isAvailable ? 1 : 0,
+            payload.cuisineType || payload.cuisine_type || null,
+            payload.mealType || payload.meal_type || "lunch",
+            payload.foodType || payload.food_type || "vegetarian",
+            payload.preparationTimeMins ||
+                payload.preparation_time_mins ||
+                20,
+            payload.imageUrl || payload.image_url || null,
+            payload.isAvailable === false || Number(payload.is_available) === 0
+                ? 0
+                : 1,
             itemId,
             restaurantId,
         ]
@@ -243,7 +338,12 @@ export const getRestaurantDashboard = async (restaurantId) => {
 
     const recentOrders = await query(
         `
-        SELECT id, order_number, status, total, created_at
+        SELECT
+            id,
+            order_number,
+            status,
+            total,
+            created_at
         FROM orders
         WHERE restaurant_id = ?
         ORDER BY created_at DESC
@@ -268,9 +368,11 @@ export const listRestaurantOrders = async (restaurantId, status) =>
             o.customer_notes,
             c.name AS customer_name,
             c.phone AS customer_phone,
+            a.door_no,
             a.street,
             a.area,
             a.city,
+            a.state,
             a.pincode
         FROM orders o
         INNER JOIN users c ON c.id = o.customer_id

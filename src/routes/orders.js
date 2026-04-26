@@ -3,6 +3,7 @@ import { authenticate } from "../middleware/authenticate.js";
 import { authorize } from "../middleware/authorize.js";
 import { ROLES } from "../constants/index.js";
 import {
+    cancelOrder,
     getMyOrders,
     getOrderDetails,
     getOrderTracking,

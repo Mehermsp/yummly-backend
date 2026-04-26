@@ -1,7 +1,67 @@
 import { getOne, query, withTransaction } from "../config/db.js";
 import { ORDER_STATUS } from "../constants/index.js";
 
-export const listCustomerOrders = async (customerId) =>
+const orderSelect = `
+    SELECT
+        o.*,
+        o.customer_notes AS notes,
+        c.phone AS phone,
+        r.name AS restaurant_name,
+        COALESCE(r.cover_image_url, r.logo_url) AS restaurant_image,
+        r.phone AS restaurant_phone,
+        c.name AS customer_name,
+        c.phone AS customer_phone,
+        d.name AS delivery_partner_name,
+        d.phone AS delivery_partner_phone,
+        a.door_no,
+        a.street,
+        a.area,
+        a.city,
+        a.state,
+        a.pincode,
+        a.landmark
+    FROM orders o
+    INNER JOIN restaurants r ON r.id = o.restaurant_id
+    INNER JOIN users c ON c.id = o.customer_id
+    LEFT JOIN addresses a ON a.id = o.delivery_address_id
+    LEFT JOIN users d ON d.id = o.delivery_partner_id
+`;
+
+const summarizeCart = (cartItems) => {
+    const subtotal = cartItems.reduce(
+        (sum, item) => sum + Number(item.item_price) * Number(item.qty),
+        0
+    );
+    const itemDiscount = cartItems.reduce(
+        (sum, item) =>
+            sum +
+            (Number(item.item_price) *
+                Number(item.qty) *
+                Number(item.discount || 0)) /
+                100,
+        0
+    );
+    const taxAmount = Number((subtotal * 0.05).toFixed(2));
+    const deliveryFee = subtotal >= 400 ? 0 : 40;
+    const total = Number(
+        (subtotal - itemDiscount + deliveryFee + taxAmount).toFixed(2)
+    );
+    const prepMinutes = Math.max(
+        20,
+        ...cartItems.map((item) => Number(item.preparation_time_mins || 20))
+    );
+
+    return {
+        subtotal,
+        itemDiscount: Number(itemDiscount.toFixed(2)),
+        taxAmount,
+        deliveryFee,
+        total,
+        estimatedDeliveryMinutes: prepMinutes + 30,
+    };
+};
+
+export const listCustomerOrders = async (customerId, status) =>
     query(
         `
         SELECT
@@ -13,43 +73,29 @@ export const listCustomerOrders = async (customerId) =>
             o.payment_status,
             o.created_at,
             r.name AS restaurant_name,
-            r.image_url AS restaurant_image
+            COALESCE(r.cover_image_url, r.logo_url) AS restaurant_image
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         WHERE o.customer_id = ?
+          AND (? IS NULL OR o.status = ?)
         ORDER BY o.created_at DESC
         `,
-        [customerId]
+        [customerId, status || null, status || null]
     );
 
 export const getOrderById = async (orderId) =>
-    getOne(
-        `
-        SELECT
-            o.*,
-            r.name AS restaurant_name,
-            r.image_url AS restaurant_image,
-            r.phone AS restaurant_phone,
-            c.name AS customer_name,
-            c.phone AS customer_phone,
-            d.name AS delivery_partner_name,
-            d.phone AS delivery_partner_phone,
-            a.door_no, a.street, a.area, a.city, a.state, a.pincode, a.landmark
-        FROM orders o
-        INNER JOIN restaurants r ON r.id = o.restaurant_id
-        INNER JOIN users c ON c.id = o.customer_id
-        LEFT JOIN addresses a ON a.id = o.delivery_address_id
-        LEFT JOIN users d ON d.id = o.delivery_partner_id
-        WHERE o.id = ?
-        LIMIT 1
-        `,
-        [orderId]
-    );
+    getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId]);
 
 export const getOrderItems = async (orderId) =>
     query(
         `
-        SELECT id, menu_item_id AS menu_id, name, price, quantity AS qty
+        SELECT
+            id,
+            menu_item_id AS menu_id,
+            name,
+            price,
+            quantity AS qty,
+            subtotal
         FROM order_items
         WHERE order_id = ?
         ORDER BY id ASC
@@ -60,7 +106,13 @@ export const getOrderItems = async (orderId) =>
 export const getOrderStatusLogs = async (orderId) =>
     query(
         `
-        SELECT old_status, new_status, changed_by, changed_by_role, notes, created_at
+        SELECT
+            old_status,
+            new_status,
+            changed_by,
+            changed_by_role,
+            notes,
+            created_at
         FROM order_status_logs
         WHERE order_id = ?
         ORDER BY id ASC
@@ -75,7 +127,6 @@ export const createOrder = async ({
     customerNotes,
 }) =>
     withTransaction(async (connection) => {
-        // Get cart items with menu details
         const [cartItems] = await connection.execute(
             `
             SELECT
@@ -87,9 +138,14 @@ export const createOrder = async ({
                 mi.name,
                 mi.restaurant_id,
                 mi.description,
-                mi.discount_percent AS discount
+                mi.discount_percent AS discount,
+                mi.preparation_time_mins,
+                mi.is_available,
+                r.is_active,
+                r.is_open
             FROM cart_items ci
             INNER JOIN menu_items mi ON mi.id = ci.menu_item_id
+            INNER JOIN restaurants r ON r.id = mi.restaurant_id
             WHERE ci.user_id = ?
             ORDER BY ci.id ASC
             `,
@@ -100,32 +156,36 @@ export const createOrder = async ({
             throw new Error("Cart is empty");
         }
 
+        if (
+            cartItems.some(
+                (item) =>
+                    !item.is_available || !item.is_active || !item.is_open
+            )
+        ) {
+            throw new Error(
+                "One or more cart items are unavailable right now"
+            );
+        }
+
         const restaurantId = cartItems[0].restaurant_id;
         if (cartItems.some((item) => item.restaurant_id !== restaurantId)) {
             throw new Error("Cart must contain items from only one restaurant");
         }
 
-        const subtotal = cartItems.reduce(
-            (sum, item) => sum + Number(item.item_price * item.qty),
-            0
-        );
-        const itemDiscount = cartItems.reduce(
-            (sum, item) =>
-                sum +
-                (Number(item.item_price) *
-                    Number(item.qty) *
-                    Number(item.discount || 0)) /
-                    100,
-            0
-        );
-        const taxAmount = Number((subtotal * 0.05).toFixed(2)); // 5% tax
-        const deliveryFee = subtotal >= 400 ? 0 : 40; // Default delivery fee
-        const total = Number(
-            (subtotal - itemDiscount + deliveryFee + taxAmount).toFixed(2)
-        );
-        const orderNumber = `TK${Date.now()}`;
+        const {
+            subtotal,
+            itemDiscount,
+            taxAmount,
+            deliveryFee,
+            total,
+            estimatedDeliveryMinutes,
+        } = summarizeCart(cartItems);
 
-        // Create order
+        const orderNumber = `TK${Date.now()}`;
+        const estimatedDeliveryTime = new Date(
+            Date.now() + estimatedDeliveryMinutes * 60 * 1000
+        );
+
         const [orderResult] = await connection.execute(
             `
             INSERT INTO orders (
@@ -141,8 +201,8 @@ export const createOrder = async ({
                 total,
                 payment_method,
                 payment_status,
-                customer_notes,
-                phone
+                estimated_delivery_time,
+                customer_notes
             ) VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             `,
             [
@@ -156,14 +216,13 @@ export const createOrder = async ({
                 taxAmount,
                 total,
                 paymentMethod || "cash",
+                estimatedDeliveryTime,
                 customerNotes || null,
-                null,
             ]
         );
 
         const orderId = orderResult.insertId;
 
-        // Create order items
         for (const item of cartItems) {
             await connection.execute(
                 `
@@ -184,12 +243,29 @@ export const createOrder = async ({
                     item.item_price,
                     item.qty,
                     item.discount || 0,
-                    Number((item.item_price * item.qty).toFixed(2)),
+                    Number(
+                        (
+                            Number(item.item_price) * Number(item.qty)
+                        ).toFixed(2)
+                    ),
                 ]
             );
         }
 
-        // Clear cart
+        await connection.execute(
+            `
+            INSERT INTO order_status_logs (
+                order_id,
+                old_status,
+                new_status,
+                changed_by,
+                changed_by_role,
+                notes
+            ) VALUES (?, NULL, 'placed', ?, 'customer', ?)
+            `,
+            [orderId, customerId, customerNotes || "Order placed"]
+        );
+
         await connection.execute(`DELETE FROM cart_items WHERE user_id = ?`, [
             customerId,
         ]);
@@ -208,7 +284,6 @@ export const updateOrderStatus = async ({
 }) => {
     const statusTimestamps = {
         confirmed: "confirmed_at = CURRENT_TIMESTAMP",
-        preparing: null,
         ready_for_pickup: "prepared_at = CURRENT_TIMESTAMP",
         out_for_delivery: "picked_up_at = CURRENT_TIMESTAMP",
         delivered:
@@ -219,11 +294,22 @@ export const updateOrderStatus = async ({
     const extraSet = statusTimestamps[nextStatus]
         ? `, ${statusTimestamps[nextStatus]}`
         : "";
+    const paymentSet =
+        nextStatus === ORDER_STATUS.DELIVERED
+            ? `, payment_status = CASE
+                    WHEN payment_method = 'cash' THEN 'completed'
+                    ELSE payment_status
+               END`
+            : "";
 
     await query(
         `
         UPDATE orders
-        SET status = ?, delivery_partner_id = COALESCE(?, delivery_partner_id) ${extraSet}
+        SET
+            status = ?,
+            delivery_partner_id = COALESCE(?, delivery_partner_id)
+            ${extraSet}
+            ${paymentSet}
         WHERE id = ?
         `,
         [nextStatus, deliveryPartnerId || null, orderId]
@@ -276,15 +362,22 @@ export const getDeliveryOpenOrders = async () =>
             o.order_number,
             o.status,
             o.total,
+            o.delivery_fee,
             o.created_at,
             r.name AS restaurant_name,
             r.address AS restaurant_address,
-            a.door_no, a.street, a.area, a.city, a.pincode
+            a.door_no,
+            a.street,
+            a.area,
+            a.city,
+            a.state,
+            a.pincode
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         LEFT JOIN addresses a ON a.id = o.delivery_address_id
         LEFT JOIN delivery_assignments da
-            ON da.order_id = o.id AND da.status IN ('assigned', 'accepted', 'picked_up')
+            ON da.order_id = o.id
+           AND da.status IN ('assigned', 'accepted', 'picked_up')
         WHERE o.status = 'ready_for_pickup' AND da.id IS NULL
         ORDER BY o.created_at ASC
         `
@@ -370,7 +463,11 @@ export const listRestaurantOrders = async (restaurantId, status) =>
             o.customer_notes,
             c.name AS customer_name,
             c.phone AS customer_phone,
-            a.door_no, a.street, a.area, a.city, a.pincode
+            a.door_no,
+            a.street,
+            a.area,
+            a.city,
+            a.pincode
         FROM orders o
         INNER JOIN users c ON c.id = o.customer_id
         LEFT JOIN addresses a ON a.id = o.delivery_address_id
@@ -387,18 +484,29 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
         SELECT
             da.order_id,
             da.status AS assignment_status,
+            da.assigned_at,
+            da.accepted_at,
+            da.rejected_at,
+            da.picked_up_at,
+            da.delivered_at,
             o.order_number,
             o.status AS order_status,
             o.total,
+            o.delivery_fee,
             o.created_at,
-            o.phone AS customer_phone,
             o.customer_notes,
             r.name AS restaurant_name,
             r.phone AS restaurant_phone,
             r.address AS restaurant_address,
             c.name AS customer_name,
-            c.phone AS customer_phone_raw,
-            a.door_no, a.street, a.area, a.city, a.state, a.pincode, a.landmark
+            c.phone AS customer_phone,
+            a.door_no,
+            a.street,
+            a.area,
+            a.city,
+            a.state,
+            a.pincode,
+            a.landmark
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id
@@ -414,7 +522,8 @@ export const adminAssignOrder = async ({ orderId, deliveryPartnerId, adminId }) 
     withTransaction(async (connection) => {
         const [existing] = await connection.execute(
             `
-            SELECT id FROM delivery_assignments
+            SELECT id
+            FROM delivery_assignments
             WHERE order_id = ? AND status IN ('assigned', 'accepted', 'picked_up')
             LIMIT 1
             `,
@@ -447,24 +556,35 @@ export const adminAssignOrder = async ({ orderId, deliveryPartnerId, adminId }) 
             INSERT INTO admin_activity_logs (admin_id, action, entity_type, entity_id, description)
             VALUES (?, 'assign_order', 'order', ?, ?)
             `,
-            [adminId, orderId, `Assigned order ${orderId} to delivery partner ${deliveryPartnerId}`]
+            [
+                adminId,
+                orderId,
+                `Assigned order ${orderId} to delivery partner ${deliveryPartnerId}`,
+            ]
         );
     });
 
 export const getDeliveryPartnerStats = async (deliveryPartnerId) => {
     const today = new Date().toISOString().split("T")[0];
-    const [stats] = await query(
+    const rows = await query(
         `
         SELECT
             COUNT(*) AS total_deliveries,
-            COUNT(CASE WHEN DATE(delivered_at) = ? THEN 1 END) AS today_deliveries,
-            COALESCE(SUM(CASE WHEN DATE(delivered_at) = ? THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
-            COALESCE(AVG(delivery_rating), 0) AS avg_rating
+            COUNT(CASE WHEN DATE(da.delivered_at) = ? THEN 1 END) AS today_deliveries,
+            COALESCE(SUM(CASE WHEN DATE(da.delivered_at) = ? THEN o.delivery_fee ELSE 0 END), 0) AS today_earnings,
+            COALESCE(AVG(u.delivery_rating), 0) AS avg_rating
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
+        INNER JOIN users u ON u.id = da.delivery_partner_id
         WHERE da.delivery_partner_id = ? AND da.status = 'delivered'
         `,
         [today, today, deliveryPartnerId]
     );
-    return stats;
+
+    return rows[0] || {
+        total_deliveries: 0,
+        today_deliveries: 0,
+        today_earnings: 0,
+        avg_rating: 0,
+    };
 };

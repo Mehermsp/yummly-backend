@@ -4,17 +4,17 @@ import helmet from "helmet";
 import compression from "compression";
 import { errorHandler } from "./middleware/errorHandler.js";
 
-// Import routes from the documented file structure
-import authRoutes from "./routes/auth.js";
-import customerRoutes from "./routes/customer.js";
-import orderRoutes from "./routes/orders.js";
-import deliveryRoutes from "./routes/delivery.js";
-import restaurantRoutes from "./routes/restaurant.js";
-import restaurantsRoutes from "./routes/restaurants.js";
-import adminRoutes from "./routes/admin.js";
-import paymentRoutes from "./routes/payment.js";
-import notificationRoutes from "./routes/notifications.js";
-import cartRoutes from "./routes/cart.js";
+import authRoutes from "./src/routes/auth.js";
+import customerRoutes from "./src/routes/customer.js";
+import orderRoutes from "./src/routes/orders.js";
+import deliveryRoutes from "./src/routes/delivery.js";
+import restaurantRoutes from "./src/routes/restaurant.js";
+import restaurantsRoutes from "./src/routes/restaurants.js";
+import adminRoutes from "./src/routes/admin.js";
+import paymentRoutes from "./src/routes/payment.js";
+import notificationRoutes from "./src/routes/notifications.js";
+import cartRoutes from "./src/routes/cart.js";
+import reviewRoutes from "./src/routes/reviews.js";
 
 export function createApp() {
     const app = express();
@@ -37,6 +37,7 @@ export function createApp() {
     app.use("/api/payment", paymentRoutes);
     app.use("/api/notifications", notificationRoutes);
     app.use("/api/cart", cartRoutes);
+    app.use("/api/reviews", reviewRoutes);
 
     // Health check endpoint
     app.get("/health", (req, res) => {

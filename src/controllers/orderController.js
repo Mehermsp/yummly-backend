@@ -55,7 +55,7 @@ export const placeOrder = asyncHandler(async (req, res) => {
 });
 
 export const getMyOrders = asyncHandler(async (req, res) => {
-    const orders = await listCustomerOrders(req.user.id);
+    const orders = await listCustomerOrders(req.user.id, req.query.status);
     sendSuccess(res, orders, "Orders fetched successfully");
 });
 

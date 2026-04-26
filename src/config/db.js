@@ -13,7 +13,13 @@ export const initializeDatabase = async () => {
         database: env.dbName,
         waitForConnections: true,
         connectionLimit: env.dbPoolLimit,
+        connectTimeout: env.dbConnectTimeout,
         decimalNumbers: true,
+        ssl: env.dbSsl
+            ? {
+                  rejectUnauthorized: env.dbSslRejectUnauthorized,
+              }
+            : undefined,
     });
 
     const connection = await pool.getConnection();

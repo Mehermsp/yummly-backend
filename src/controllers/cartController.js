@@ -1,28 +1,37 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 import {
+    clearCart,
     findMenuItemForCart,
     getCartForUser,
+    getCartItemById,
     getCartRestaurant,
     removeCartItem,
     upsertCartItem,
 } from "../models/cartModel.js";
 
+const buildCartResponse = (items = []) => {
+    const subtotal = items.reduce(
+        (sum, item) => sum + Number(item.total_price || 0),
+        0
+    );
+    const deliveryFee = subtotal >= 400 || subtotal === 0 ? 0 : 35;
+    const taxAmount = Number((subtotal * 0.05).toFixed(2));
+
+    return {
+        items,
+        summary: {
+            subtotal,
+            deliveryFee,
+            taxAmount,
+            total: Number((subtotal + deliveryFee + taxAmount).toFixed(2)),
+        },
+    };
+};
+
 export const getCart = asyncHandler(async (req, res) => {
     const items = await getCartForUser(req.user.id);
-    const subtotal = items.reduce((sum, item) => sum + Number(item.total_price), 0);
-    sendSuccess(
-        res,
-        {
-            items,
-            summary: {
-                subtotal,
-                deliveryFee: subtotal >= 400 || subtotal === 0 ? 0 : 35,
-                taxAmount: Number((subtotal * 0.05).toFixed(2)),
-            },
-        },
-        "Cart fetched successfully"
-    );
+    sendSuccess(res, buildCartResponse(items), "Cart fetched successfully");
 });
 
 export const addCartItem = asyncHandler(async (req, res) => {
@@ -47,42 +56,68 @@ export const addCartItem = asyncHandler(async (req, res) => {
         );
     }
 
+    const safeQuantity = Math.max(1, Number(quantity));
     const unitPrice = Number(menuItem.price);
-    const totalPrice = Number((unitPrice * Number(quantity)).toFixed(2));
+    const totalPrice = Number((unitPrice * safeQuantity).toFixed(2));
 
     await upsertCartItem({
         userId: req.user.id,
         restaurantId: menuItem.restaurant_id,
         menuItemId,
-        quantity,
+        quantity: safeQuantity,
         unitPrice,
         totalPrice,
     });
 
     const items = await getCartForUser(req.user.id);
-    sendSuccess(res, items, "Cart updated successfully");
+    sendSuccess(
+        res,
+        buildCartResponse(items),
+        "Cart updated successfully"
+    );
 });
 
 export const updateCartItem = asyncHandler(async (req, res) => {
-    const { menuItemId, restaurantId, unitPrice, quantity } = req.body;
-    if (!menuItemId || !restaurantId || !unitPrice || !quantity || quantity < 1) {
-        throw new AppError(400, "menuItemId, restaurantId, unitPrice and valid quantity are required");
+    const safeQuantity = Number(req.body.quantity);
+    if (!Number.isFinite(safeQuantity)) {
+        throw new AppError(400, "quantity is required");
     }
 
-    await upsertCartItem({
-        userId: req.user.id,
-        restaurantId,
-        menuItemId,
-        quantity,
-        unitPrice,
-        totalPrice: Number((unitPrice * quantity).toFixed(2)),
-    });
+    const existing = await getCartItemById(req.user.id, req.params.cartItemId);
+    if (!existing) {
+        throw new AppError(404, "Cart item not found");
+    }
+
+    if (safeQuantity <= 0) {
+        await removeCartItem(req.user.id, req.params.cartItemId);
+    } else {
+        await upsertCartItem({
+            userId: req.user.id,
+            restaurantId: existing.restaurant_id,
+            menuItemId: existing.menu_item_id,
+            quantity: safeQuantity,
+            unitPrice: Number(existing.unit_price),
+            totalPrice: Number(
+                (Number(existing.unit_price) * safeQuantity).toFixed(2)
+            ),
+        });
+    }
+
     const items = await getCartForUser(req.user.id);
-    sendSuccess(res, items, "Cart item updated successfully");
+    sendSuccess(
+        res,
+        buildCartResponse(items),
+        "Cart item updated successfully"
+    );
 });
 
 export const deleteCartItem = asyncHandler(async (req, res) => {
     await removeCartItem(req.user.id, req.params.cartItemId);
     const items = await getCartForUser(req.user.id);
-    sendSuccess(res, items, "Cart item removed");
+    sendSuccess(res, buildCartResponse(items), "Cart item removed");
+});
+
+export const clearCustomerCart = asyncHandler(async (req, res) => {
+    await clearCart(req.user.id);
+    sendSuccess(res, buildCartResponse([]), "Cart cleared successfully");
 });
