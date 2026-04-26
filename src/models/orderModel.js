@@ -391,14 +391,80 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
             o.status AS order_status,
             o.total,
             o.created_at,
+            o.phone AS customer_phone,
+            o.customer_notes,
             r.name AS restaurant_name,
-            a.door_no, a.street, a.area, a.city, a.pincode
+            r.phone AS restaurant_phone,
+            r.address AS restaurant_address,
+            c.name AS customer_name,
+            c.phone AS customer_phone_raw,
+            a.door_no, a.street, a.area, a.city, a.state, a.pincode, a.landmark
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id
+        INNER JOIN users c ON c.id = o.customer_id
         LEFT JOIN addresses a ON a.id = o.delivery_address_id
         WHERE da.delivery_partner_id = ?
         ORDER BY da.assigned_at DESC
         `,
         [deliveryPartnerId]
     );
+
+export const adminAssignOrder = async ({ orderId, deliveryPartnerId, adminId }) =>
+    withTransaction(async (connection) => {
+        const [existing] = await connection.execute(
+            `
+            SELECT id FROM delivery_assignments
+            WHERE order_id = ? AND status IN ('assigned', 'accepted', 'picked_up')
+            LIMIT 1
+            `,
+            [orderId]
+        );
+
+        if (existing.length) {
+            throw new Error("Order already assigned to a delivery partner");
+        }
+
+        await connection.execute(
+            `
+            INSERT INTO delivery_assignments (order_id, delivery_partner_id, status, assigned_at)
+            VALUES (?, ?, 'assigned', CURRENT_TIMESTAMP)
+            `,
+            [orderId, deliveryPartnerId]
+        );
+
+        await connection.execute(
+            `
+            UPDATE orders
+            SET delivery_partner_id = ?
+            WHERE id = ?
+            `,
+            [deliveryPartnerId, orderId]
+        );
+
+        await connection.execute(
+            `
+            INSERT INTO admin_activity_logs (admin_id, action, entity_type, entity_id, description)
+            VALUES (?, 'assign_order', 'order', ?, ?)
+            `,
+            [adminId, orderId, `Assigned order ${orderId} to delivery partner ${deliveryPartnerId}`]
+        );
+    });
+
+export const getDeliveryPartnerStats = async (deliveryPartnerId) => {
+    const today = new Date().toISOString().split("T")[0];
+    const [stats] = await query(
+        `
+        SELECT
+            COUNT(*) AS total_deliveries,
+            COUNT(CASE WHEN DATE(delivered_at) = ? THEN 1 END) AS today_deliveries,
+            COALESCE(SUM(CASE WHEN DATE(delivered_at) = ? THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
+            COALESCE(AVG(delivery_rating), 0) AS avg_rating
+        FROM delivery_assignments da
+        INNER JOIN orders o ON o.id = da.order_id
+        WHERE da.delivery_partner_id = ? AND da.status = 'delivered'
+        `,
+        [today, today, deliveryPartnerId]
+    );
+    return stats;
+};

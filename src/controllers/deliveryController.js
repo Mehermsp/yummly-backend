@@ -4,17 +4,21 @@ import { updateDeliveryAvailability } from "../models/userModel.js";
 import {
     createDeliveryAssignment,
     getDeliveryOpenOrders,
+    getDeliveryPartnerStats,
     getOrderById,
     listDeliveryAssignments,
     updateAssignmentStatus,
     updateOrderStatus,
-    listRestaurantOrders,
 } from "../models/orderModel.js";
-import { DELIVERY_ASSIGNMENT_STATUS, ORDER_STATUS } from "../constants/index.js";
+import {
+    DELIVERY_ASSIGNMENT_STATUS,
+    ORDER_STATUS,
+} from "../constants/index.js";
 
 export const getDeliveryDashboard = asyncHandler(async (req, res) => {
     const openOrders = await getDeliveryOpenOrders();
     const assignments = await listDeliveryAssignments(req.user.id);
+    const stats = await getDeliveryPartnerStats(req.user.id);
 
     sendSuccess(
         res,
@@ -22,6 +26,7 @@ export const getDeliveryDashboard = asyncHandler(async (req, res) => {
             profile: req.user,
             openOrders,
             assignments,
+            stats,
         },
         "Delivery dashboard fetched successfully"
     );
@@ -48,14 +53,23 @@ export const getDeliveryIncome = asyncHandler(async (req, res) => {
         .filter((a) => a.assignment_status === "delivered")
         .reduce((sum, a) => sum + Number(a.total || 0) * 0.1, 0); // 10% commission
 
-    sendSuccess(res, {
-        totalDeliveries: assignments.filter((a) => a.assignment_status === "delivered").length,
-        totalIncome: Number(totalIncome.toFixed(2)),
-    }, "Delivery income fetched successfully");
+    sendSuccess(
+        res,
+        {
+            totalDeliveries: assignments.filter(
+                (a) => a.assignment_status === "delivered"
+            ).length,
+            totalIncome: Number(totalIncome.toFixed(2)),
+        },
+        "Delivery income fetched successfully"
+    );
 });
 
 export const setDeliveryAvailability = asyncHandler(async (req, res) => {
-    await updateDeliveryAvailability(req.user.id, Boolean(req.body.isAvailable));
+    await updateDeliveryAvailability(
+        req.user.id,
+        Boolean(req.body.isAvailable)
+    );
     sendSuccess(
         res,
         {

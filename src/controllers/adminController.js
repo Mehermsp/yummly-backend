@@ -1,5 +1,5 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { sendSuccess } from "../utils/http.js";
+import { AppError, sendSuccess } from "../utils/http.js";
 import {
     approveRestaurantApplication,
     getOverviewMetrics,
@@ -8,6 +8,7 @@ import {
 } from "../models/adminModel.js";
 import { listUsers } from "../models/userModel.js";
 import { listApplications } from "../models/restaurantModel.js";
+import { adminAssignOrder, getDeliveryPartnerStats, getDeliveryOpenOrders } from "../models/orderModel.js";
 import { query } from "../config/db.js";
 
 export const getOverview = asyncHandler(async (req, res) => {
@@ -67,4 +68,31 @@ export const getOrders = asyncHandler(async (req, res) => {
 export const getLogs = asyncHandler(async (req, res) => {
     const items = await listAdminActivityLogs();
     sendSuccess(res, items, "Admin activity logs fetched successfully");
+});
+
+export const getDeliveryPartners = asyncHandler(async (req, res) => {
+    const items = await listUsers("delivery_partner");
+    sendSuccess(res, items, "Delivery partners fetched successfully");
+});
+
+export const getReadyForPickupOrders = asyncHandler(async (req, res) => {
+    const items = await getDeliveryOpenOrders();
+    sendSuccess(res, items, "Ready for pickup orders fetched successfully");
+});
+
+export const assignOrderToPartner = asyncHandler(async (req, res) => {
+    const { orderId } = req.params;
+    const { deliveryPartnerId } = req.body;
+
+    if (!deliveryPartnerId) {
+        throw new AppError(400, "deliveryPartnerId is required");
+    }
+
+    await adminAssignOrder({
+        orderId,
+        deliveryPartnerId,
+        adminId: req.user.id,
+    });
+
+    sendSuccess(res, null, "Order assigned to delivery partner successfully");
 });
