@@ -56,7 +56,7 @@ export const getOrders = asyncHandler(async (req, res) => {
             c.name AS customer_name,
             r.name AS restaurant_name
         FROM orders o
-        INNER JOIN users c ON c.id = o.customer_id
+        INNER JOIN users c ON c.id = o.user_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         ORDER BY o.created_at DESC
         LIMIT 100

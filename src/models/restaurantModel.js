@@ -1,11 +1,11 @@
 import { getOne, query } from "../config/db.js";
 
 const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
-    const filters = ["restaurant_id = ?", "is_deleted = 0"];
+    const filters = ["restaurant_id = ?"];
     const params = [];
 
     if (!includeUnavailable) {
-        filters.push("is_available = 1");
+        filters.push("COALESCE(is_available, available, 1) = 1");
     }
 
     if (category) {
@@ -71,9 +71,9 @@ export const listApprovedRestaurants = async ({
             r.landmark,
             r.address,
             r.pincode,
-            r.logo_url,
-            r.cover_image_url,
-            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
+            NULL AS logo_url,
+            r.cover_image AS cover_image_url,
+            COALESCE(r.cover_image, r.image_url, r.logo) AS image_url,
             r.rating,
             r.total_orders,
             r.cuisines,
@@ -101,9 +101,9 @@ export const getRestaurantById = async (restaurantId) =>
         SELECT
             r.*,
             r.landmark AS area,
-            r.logo_url AS logo,
-            r.cover_image_url AS cover_image,
-            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
+            NULL AS logo,
+            r.cover_image AS cover_image,
+            COALESCE(r.cover_image, r.image_url, r.logo) AS image_url,
             u.name AS owner_name,
             u.phone AS owner_phone
         FROM restaurants r
@@ -132,14 +132,14 @@ export const getRestaurantMenu = async (
             name,
             description,
             price,
-            discount_percent AS discount,
+            discount AS discount,
             category,
             cuisine_type,
             meal_type,
             food_type,
             preparation_time_mins,
             is_available,
-            image_url AS image,
+            image AS image,
             rating,
             popularity
         FROM menu_items
@@ -171,9 +171,9 @@ export const createRestaurantApplication = async (payload) => {
             open_time,
             close_time,
             days_open,
-            fssai_number,
-            gst_number,
-            pan_number
+            fssai,
+            gst,
+            pan
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
@@ -217,9 +217,9 @@ export const getRestaurantByOwnerId = async (ownerId) =>
         SELECT
             *,
             landmark AS area,
-            logo_url AS logo,
-            cover_image_url AS cover_image,
-            COALESCE(cover_image_url, logo_url) AS image_url
+            NULL AS logo,
+            cover_image AS cover_image,
+            COALESCE(cover_image, image_url, logo) AS image_url
         FROM restaurants
         WHERE owner_id = ?
         LIMIT 1
@@ -235,13 +235,13 @@ export const createMenuItem = async (restaurantId, payload) => {
             name,
             description,
             price,
-            discount_percent,
+            discount,
             category,
             cuisine_type,
             meal_type,
             food_type,
             preparation_time_mins,
-            image_url,
+            image,
             is_available
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
@@ -261,7 +261,7 @@ export const createMenuItem = async (restaurantId, payload) => {
             payload.preparationTimeMins ||
                 payload.preparation_time_mins ||
                 20,
-            payload.imageUrl || payload.image_url || null,
+            payload.imageUrl || payload.image || null,
             payload.isAvailable === false || Number(payload.is_available) === 0
                 ? 0
                 : 1,
@@ -279,13 +279,13 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             name = ?,
             description = ?,
             price = ?,
-            discount_percent = ?,
+            discount = ?,
             category = ?,
             cuisine_type = ?,
             meal_type = ?,
             food_type = ?,
             preparation_time_mins = ?,
-            image_url = ?,
+            image = ?,
             is_available = ?
         WHERE id = ? AND restaurant_id = ?
         `,
@@ -304,7 +304,7 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             payload.preparationTimeMins ||
                 payload.preparation_time_mins ||
                 20,
-            payload.imageUrl || payload.image_url || null,
+            payload.imageUrl || payload.image || null,
             payload.isAvailable === false || Number(payload.is_available) === 0
                 ? 0
                 : 1,
@@ -317,7 +317,7 @@ export const deleteMenuItem = async (restaurantId, itemId) =>
     query(
         `
         UPDATE menu_items
-        SET is_deleted = 1, is_available = 0
+        SET is_available = 0, available = 0
         WHERE id = ? AND restaurant_id = ?
         `,
         [itemId, restaurantId]
@@ -365,7 +365,7 @@ export const listRestaurantOrders = async (restaurantId, status) =>
             o.total,
             o.payment_status,
             o.created_at,
-            o.customer_notes,
+            o.notes,
             c.name AS customer_name,
             c.phone AS customer_phone,
             a.door_no,
@@ -375,8 +375,8 @@ export const listRestaurantOrders = async (restaurantId, status) =>
             a.state,
             a.pincode
         FROM orders o
-        INNER JOIN users c ON c.id = o.customer_id
-        LEFT JOIN addresses a ON a.id = o.delivery_address_id
+        INNER JOIN users c ON c.id = o.user_id
+        LEFT JOIN addresses a ON a.id = o.address_id
         WHERE o.restaurant_id = ?
           AND (? IS NULL OR o.status = ?)
         ORDER BY o.created_at DESC

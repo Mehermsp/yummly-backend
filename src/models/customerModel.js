@@ -149,14 +149,14 @@ export const listWishlist = async (userId) =>
             mi.id AS menu_id,
             mi.name,
             mi.price,
-            mi.image_url AS image,
+            mi.image AS image,
             mi.description,
             mi.category,
-            mi.discount_percent AS discount,
+            mi.discount AS discount,
             mi.restaurant_id,
             r.name AS restaurant_name
         FROM wishlists w
-        INNER JOIN menu_items mi ON mi.id = w.menu_item_id
+        INNER JOIN menu_items mi ON mi.id = w.menu_id
         INNER JOIN restaurants r ON r.id = mi.restaurant_id
         WHERE w.user_id = ?
         ORDER BY w.created_at DESC
@@ -167,7 +167,7 @@ export const listWishlist = async (userId) =>
 export const addWishlistRestaurant = async (userId, menuItemId) =>
     query(
         `
-        INSERT IGNORE INTO wishlists (user_id, menu_item_id)
+        INSERT IGNORE INTO wishlists (user_id, menu_id)
         VALUES (?, ?)
         `,
         [userId, menuItemId]
@@ -178,7 +178,7 @@ export const removeWishlistRestaurant = async (userId, wishlistOrMenuItemId) =>
         `
         DELETE FROM wishlists
         WHERE user_id = ?
-          AND (id = ? OR menu_item_id = ?)
+          AND (id = ? OR menu_id = ?)
         `,
         [userId, wishlistOrMenuItemId, wishlistOrMenuItemId]
     );
