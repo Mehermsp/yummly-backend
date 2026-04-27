@@ -7,7 +7,6 @@ export const createReview = async ({
     orderId,
     customerId,
     restaurantId,
-    deliveryPartnerId,
     restaurantRating,
     restaurantComment,
     deliveryRating,
@@ -18,20 +17,18 @@ export const createReview = async ({
             `
             INSERT INTO reviews (
                 order_id,
-                customer_id,
+                user_id,
                 restaurant_id,
-                delivery_partner_id,
-                restaurant_rating,
-                restaurant_comment,
+                rating,
+                comment,
                 delivery_rating,
                 delivery_comment
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             `,
             [
                 orderId,
                 customerId,
                 restaurantId,
-                deliveryPartnerId || null,
                 restaurantRating,
                 restaurantComment || null,
                 deliveryRating || null,
@@ -43,7 +40,7 @@ export const createReview = async ({
             `
             UPDATE restaurants r
             JOIN (
-                SELECT restaurant_id, AVG(restaurant_rating) AS avg_rating
+                SELECT restaurant_id, AVG(rating) AS avg_rating
                 FROM reviews
                 WHERE restaurant_id = ?
             ) agg ON agg.restaurant_id = r.id
@@ -52,21 +49,4 @@ export const createReview = async ({
             `,
             [restaurantId, restaurantId]
         );
-
-        if (deliveryPartnerId && deliveryRating) {
-            await connection.execute(
-                `
-                UPDATE users u
-                JOIN (
-                    SELECT delivery_partner_id, AVG(delivery_rating) AS avg_rating, COUNT(*) AS delivery_count
-                    FROM reviews
-                    WHERE delivery_partner_id = ? AND delivery_rating IS NOT NULL
-                ) agg ON agg.delivery_partner_id = u.id
-                SET u.delivery_rating = ROUND(agg.avg_rating, 2),
-                    u.total_deliveries = agg.delivery_count
-                WHERE u.id = ?
-                `,
-                [deliveryPartnerId, deliveryPartnerId]
-            );
-        }
     });

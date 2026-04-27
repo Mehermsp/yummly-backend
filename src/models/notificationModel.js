@@ -8,8 +8,6 @@ export const listNotifications = async (userId, { limit, offset }) => {
             title,
             message,
             type,
-            related_entity_type,
-            related_entity_id,
             data,
             is_read,
             read_at,
