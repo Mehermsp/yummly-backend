@@ -145,6 +145,7 @@ export const listWishlist = async (userId) =>
         `
         SELECT
             w.id,
+            w.id AS wishlist_id,
             mi.id AS menu_id,
             mi.name,
             mi.price,

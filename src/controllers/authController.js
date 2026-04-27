@@ -8,8 +8,8 @@ import {
     findUserForAuth,
     getUserById,
     hashPassword,
-    markOtpUsed,
     markPhoneVerified,
+    markOtpUsed,
     revokeRefreshToken,
     revokeUserRefreshTokens,
     storeRefreshToken,
@@ -136,25 +136,12 @@ export const login = asyncHandler(async (req, res) => {
         }
     }
 
-    const otpCode = generateOtp();
-    await createOtpVerification({
-        userId: user.id,
-        phone: user.phone,
-        otpCode,
-        type: "login",
-        expiresAt: buildOtpExpiry(),
-    });
+    const session = await issueTokens(user);
 
     sendSuccess(
         res,
-        {
-            userId: user.id,
-            phone: user.phone,
-            role: user.role,
-            otpExpiresInMinutes: env.otpTtlMinutes,
-            devOtp: exposeDevOtp(otpCode),
-        },
-        "OTP sent. Verify OTP to complete login."
+        session,
+        "Login successful"
     );
 });
 

@@ -32,7 +32,9 @@ export const getRestaurantDetails = asyncHandler(async (req, res) => {
         throw new AppError(404, "Restaurant not found");
     }
 
-    const menu = await getRestaurantMenu(req.params.restaurantId);
+    const menu = await getRestaurantMenu(req.params.restaurantId, {
+        includeUnavailable: false,
+    });
     sendSuccess(
         res,
         { restaurant, menu },

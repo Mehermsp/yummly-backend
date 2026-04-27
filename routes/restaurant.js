@@ -1,7 +1,0 @@
-import express from "express";
-
-const router = express.Router();
-
-// Restaurant endpoints
-
-export default router;

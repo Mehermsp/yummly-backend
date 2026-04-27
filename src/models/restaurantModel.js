@@ -36,7 +36,7 @@ export const listApprovedRestaurants = async ({
 
     if (search) {
         filters.push(
-            "(r.name LIKE ? OR r.city LIKE ? OR r.landmark LIKE ? OR r.cuisines LIKE ?)"
+            "(r.name LIKE ? OR r.city LIKE ? OR r.landmark LIKE ? OR CAST(r.cuisines AS CHAR) LIKE ?)"
         );
         params.push(
             `%${search}%`,
@@ -66,7 +66,7 @@ export const listApprovedRestaurants = async ({
             r.name,
             r.description,
             r.city,
-            r.state,
+            NULL AS state,
             r.landmark AS area,
             r.landmark,
             r.address,
