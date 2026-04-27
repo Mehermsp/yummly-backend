@@ -8,6 +8,8 @@ export const listNotifications = async (userId, { limit, offset }) => {
             title,
             message,
             type,
+            related_entity_type,
+            related_entity_id,
             data,
             is_read,
             read_at,
@@ -15,9 +17,9 @@ export const listNotifications = async (userId, { limit, offset }) => {
         FROM notifications
         WHERE user_id = ?
         ORDER BY created_at DESC
-        LIMIT ? OFFSET ?
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}
         `,
-        [userId, limit, offset]
+        [userId]
     );
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM notifications WHERE user_id = ?`,

@@ -38,12 +38,7 @@ export const listApprovedRestaurants = async ({
         filters.push(
             "(r.name LIKE ? OR r.city LIKE ? OR r.landmark LIKE ? OR CAST(r.cuisines AS CHAR) LIKE ?)"
         );
-        params.push(
-            `%${search}%`,
-            `%${search}%`,
-            `%${search}%`,
-            `%${search}%`
-        );
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (city) {
@@ -83,9 +78,9 @@ export const listApprovedRestaurants = async ({
         FROM restaurants r
         WHERE ${whereClause}
         ORDER BY r.is_open DESC, ${sortClause}
-        LIMIT ? OFFSET ?
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}
         `,
-        [...params, limit, offset]
+        params
     );
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM restaurants r WHERE ${whereClause}`,
@@ -190,7 +185,10 @@ export const createRestaurantApplication = async (payload) => {
             payload.openTime || payload.open_time,
             payload.closeTime || payload.close_time,
             JSON.stringify(payload.daysOpen || payload.days_open || []),
-            payload.fssaiNumber || payload.fssai || payload.fssai_number || null,
+            payload.fssaiNumber ||
+                payload.fssai ||
+                payload.fssai_number ||
+                null,
             payload.gstNumber || payload.gst || payload.gst_number || null,
             payload.panNumber || payload.pan || payload.pan_number || null,
         ]
@@ -258,9 +256,7 @@ export const createMenuItem = async (restaurantId, payload) => {
             payload.cuisineType || payload.cuisine_type || null,
             payload.mealType || payload.meal_type || "lunch",
             payload.foodType || payload.food_type || "vegetarian",
-            payload.preparationTimeMins ||
-                payload.preparation_time_mins ||
-                20,
+            payload.preparationTimeMins || payload.preparation_time_mins || 20,
             payload.imageUrl || payload.image || null,
             payload.isAvailable === false || Number(payload.is_available) === 0
                 ? 0
@@ -301,9 +297,7 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             payload.cuisineType || payload.cuisine_type || null,
             payload.mealType || payload.meal_type || "lunch",
             payload.foodType || payload.food_type || "vegetarian",
-            payload.preparationTimeMins ||
-                payload.preparation_time_mins ||
-                20,
+            payload.preparationTimeMins || payload.preparation_time_mins || 20,
             payload.imageUrl || payload.image || null,
             payload.isAvailable === false || Number(payload.is_available) === 0
                 ? 0
