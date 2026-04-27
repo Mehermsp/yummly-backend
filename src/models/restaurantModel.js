@@ -103,7 +103,7 @@ export const getRestaurantById = async (restaurantId) =>
             u.phone AS owner_phone
         FROM restaurants r
         INNER JOIN users u ON u.id = r.owner_id
-        WHERE r.id = ? AND r.is_active = 1
+        WHERE r.id = ?
         LIMIT 1
         `,
         [restaurantId]

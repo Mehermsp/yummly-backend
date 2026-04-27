@@ -13,7 +13,11 @@ export const authenticate = async (req, res, next) => {
         const payload = verifyAccessToken(header.slice(7));
         const user = await getUserById(payload.sub);
 
-        if (!user || !user.is_active) {
+        if (!user) {
+            throw new AppError(401, "User account is not active");
+        }
+
+        if (user.is_active === 0 || user.is_active === false) {
             throw new AppError(401, "User account is not active");
         }
 
