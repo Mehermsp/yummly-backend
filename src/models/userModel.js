@@ -24,8 +24,14 @@ let hasUsersIsActiveColumnPromise;
 const hasUsersIsActiveColumn = async () => {
     if (!hasUsersIsActiveColumnPromise) {
         hasUsersIsActiveColumnPromise = getOne(
-            "SHOW COLUMNS FROM users LIKE ?",
-            ["is_active"]
+            `
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'users'
+              AND column_name = 'is_active'
+            LIMIT 1
+            `
         ).then(Boolean);
     }
 
