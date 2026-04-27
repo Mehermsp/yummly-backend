@@ -1,26 +1,50 @@
 import bcrypt from "bcryptjs";
 import { getOne, query } from "../config/db.js";
 
-const baseUserSelect = `
-    SELECT
-        id,
-        role,
-        name,
-        email,
-        phone,
-        is_phone_verified,
-        is_email_verified,
-        is_active,
-        restaurant_id,
-        is_available,
-        vehicle_type,
-        vehicle_number,
-        delivery_rating,
-        total_deliveries,
-        created_at,
-        updated_at
-    FROM users
-`;
+const baseUserColumns = [
+    "id",
+    "role",
+    "name",
+    "email",
+    "phone",
+    "is_phone_verified",
+    "is_email_verified",
+    "restaurant_id",
+    "is_available",
+    "vehicle_type",
+    "vehicle_number",
+    "delivery_rating",
+    "total_deliveries",
+    "created_at",
+    "updated_at",
+];
+
+let hasUsersIsActiveColumnPromise;
+
+const hasUsersIsActiveColumn = async () => {
+    if (!hasUsersIsActiveColumnPromise) {
+        hasUsersIsActiveColumnPromise = getOne(
+            "SHOW COLUMNS FROM users LIKE ?",
+            ["is_active"]
+        ).then(Boolean);
+    }
+
+    return hasUsersIsActiveColumnPromise;
+};
+
+const buildUserSelectSql = async () => {
+    const columns = [...baseUserColumns];
+
+    if (await hasUsersIsActiveColumn()) {
+        columns.splice(7, 0, "is_active");
+    }
+
+    return `
+        SELECT
+            ${columns.join(",\n            ")}
+        FROM users
+    `;
+};
 
 export const hashPassword = async (password) =>
     password ? bcrypt.hash(password, 10) : null;
@@ -80,7 +104,7 @@ export const findUserForAuth = async (identifier) =>
     );
 
 export const getUserById = async (userId) =>
-    getOne(`${baseUserSelect} WHERE id = ? LIMIT 1`, [userId]);
+    getOne(`${await buildUserSelectSql()} WHERE id = ? LIMIT 1`, [userId]);
 
 export const markPhoneVerified = async (userId) =>
     query(
@@ -183,8 +207,11 @@ export const updateDeliveryAvailability = async (userId, isAvailable) =>
         [isAvailable ? 1 : 0, userId]
     );
 
-export const listUsers = async (role) =>
-    query(
-        `${baseUserSelect} ${role ? "WHERE role = ?" : ""} ORDER BY created_at DESC`,
+export const listUsers = async (role) => {
+    const selectSql = await buildUserSelectSql();
+
+    return query(
+        `${selectSql} ${role ? "WHERE role = ?" : ""} ORDER BY created_at DESC`,
         role ? [role] : []
     );
+};
