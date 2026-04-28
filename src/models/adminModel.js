@@ -48,39 +48,58 @@ export const approveRestaurantApplication = async ({
             `
             INSERT INTO restaurants (
                 owner_id,
+                application_id,
                 name,
                 email,
                 phone,
+                description,
                 address,
                 city,
+                state,
                 pincode,
                 landmark,
                 cuisines,
                 open_time,
                 close_time,
-                fssai,
-                gst,
-                pan,
+                days_open,
+                fssai_number,
+                gst_number,
+                pan_number,
+                logo_url,
+                cover_image_url,
                 is_active,
                 is_open
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1, 1)
             `,
             [
                 application.owner_id,
+                application.id,
                 application.restaurant_name,
                 application.email,
                 application.phone,
+                null,
                 application.address,
                 application.city,
+                application.state || null,
                 application.pincode,
-                application.landmark,
+                application.landmark || null,
                 application.cuisines,
                 application.open_time,
                 application.close_time,
-                application.fssai,
-                application.gst,
-                application.pan,
+                application.days_open,
+                application.fssai_number || null,
+                application.gst_number || null,
+                application.pan_number || null,
             ]
+        );
+
+        await connection.execute(
+            `
+            UPDATE users
+            SET restaurant_id = ?
+            WHERE id = ?
+            `,
+            [restaurantResult.insertId, application.owner_id]
         );
 
         await connection.execute(
@@ -97,12 +116,12 @@ export const approveRestaurantApplication = async ({
 
         await connection.execute(
             `
-            INSERT INTO admin_activity_log (
+            INSERT INTO admin_activity_logs (
                 admin_id,
                 action,
                 entity_type,
                 entity_id,
-                details
+                description
             ) VALUES (?, 'approve_restaurant_application', 'restaurant_application', ?, ?)
             `,
             [
@@ -136,7 +155,7 @@ export const listAdminActivityLogs = async () =>
         SELECT
             l.*,
             u.name AS admin_name
-        FROM admin_activity_log l
+        FROM admin_activity_logs l
         INNER JOIN users u ON u.id = l.admin_id
         ORDER BY l.created_at DESC
         LIMIT 100

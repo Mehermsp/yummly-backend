@@ -17,7 +17,10 @@ export const authenticate = async (req, res, next) => {
             throw new AppError(401, "User account is not active");
         }
 
-        if (user.is_active === 0 || user.is_active === false) {
+        if (
+            Object.prototype.hasOwnProperty.call(user, "is_active") &&
+            (user.is_active === 0 || user.is_active === false)
+        ) {
             throw new AppError(401, "User account is not active");
         }
 
