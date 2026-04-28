@@ -58,7 +58,6 @@ export const listApprovedRestaurants = async ({
 
     const whereClause = filters.join(" AND ");
 
-    // Main query with LIMIT and OFFSET as strings (fixes the mysql2 bug)
     const items = await query(
         `
         SELECT
@@ -84,10 +83,9 @@ export const listApprovedRestaurants = async ({
         ORDER BY r.is_open DESC, ${sortClause}
         LIMIT ? OFFSET ?
         `,
-        [...params, String(limit), String(offset)]   // ← Convert to string
+        [...params, String(limit), String(offset)] // ← String() is important
     );
 
-    // Count query (no LIMIT/OFFSET)
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM restaurants r WHERE ${whereClause}`,
         params
@@ -132,14 +130,14 @@ export const getRestaurantMenu = async (
             mi.name,
             mi.description,
             mi.price,
-            mi.discount_percent,
+            mi.discount,                    -- Changed from discount_percent
             mi.category,
             mi.cuisine_type,
             mi.meal_type,
             mi.food_type,
             mi.preparation_time_mins,
             mi.is_available,
-            mi.image_url,
+            mi.image,                       -- Changed from image_url
             mi.rating,
             mi.popularity
         FROM menu_items mi
@@ -276,7 +274,7 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             name = ?,
             description = ?,
             price = ?,
-            discount_percent = ?,
+            discount = ?,
             category = ?,
             cuisine_type = ?,
             meal_type = ?,
