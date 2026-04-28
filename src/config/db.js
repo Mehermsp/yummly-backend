@@ -5,6 +5,23 @@ import { logger } from "../utils/logger.js";
 let pool;
 
 export const initializeDatabase = async () => {
+    // Debug logging - remove after fixing
+    console.log("=== Database Env Variables ===");
+    console.log("DB_HOST:", env.dbHost ? "Loaded" : "MISSING");
+    console.log("DB_USER:", env.dbUser ? "Loaded" : "MISSING");
+    console.log("DB_NAME:", env.dbName ? "Loaded" : "MISSING");
+    console.log(
+        "DB_PASS:",
+        env.dbPassword ? "****** (present)" : "MISSING or EMPTY"
+    );
+    console.log("DB_SSL:", env.dbSsl);
+
+    if (!env.dbPassword) {
+        throw new Error(
+            "Database password is missing! Check environment variables on Render."
+        );
+    }
+
     pool = mysql.createPool({
         host: env.dbHost,
         port: env.dbPort,
@@ -12,12 +29,12 @@ export const initializeDatabase = async () => {
         password: env.dbPassword,
         database: env.dbName,
         waitForConnections: true,
-        connectionLimit: env.dbPoolLimit,
-        connectTimeout: env.dbConnectTimeout,
+        connectionLimit: env.dbPoolLimit || 10,
+        connectTimeout: env.dbConnectTimeout || 10000,
         decimalNumbers: true,
         ssl: env.dbSsl
             ? {
-                  rejectUnauthorized: env.dbSslRejectUnauthorized,
+                  rejectUnauthorized: env.dbSslRejectUnauthorized !== false,
               }
             : undefined,
     });
@@ -25,6 +42,7 @@ export const initializeDatabase = async () => {
     const connection = await pool.getConnection();
     await connection.ping();
     connection.release();
+
     logger.info("MySQL connection pool ready");
     return pool;
 };
