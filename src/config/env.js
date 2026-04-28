@@ -23,7 +23,7 @@ export const env = {
     port: Number(process.env.PORT || 5000),
     jwtAccessSecret:
         process.env.JWT_ACCESS_SECRET || "dev-access-secret-change-me",
-    jwtAccessTtl: process.env.JWT_ACCESS_TTL || "7d",
+    jwtAccessTtl: process.env.JWT_ACCESS_TTL || "",
     otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES || 5),
     dbHost: process.env.DB_HOST || "127.0.0.1",
     dbPort: Number(process.env.DB_PORT || 3306),
