@@ -4,24 +4,15 @@ import {
     comparePassword,
     createOtpVerification,
     createUser,
-    findRefreshToken,
     findUserForAuth,
     getUserById,
     hashPassword,
     markPhoneVerified,
     markOtpUsed,
-    revokeRefreshToken,
-    revokeUserRefreshTokens,
-    storeRefreshToken,
     consumeOtpVerification,
 } from "../models/userModel.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import {
-    hashToken,
-    signAccessToken,
-    signRefreshToken,
-    verifyRefreshToken,
-} from "../utils/jwt.js";
+import { signAccessToken } from "../utils/jwt.js";
 import { buildOtpExpiry, exposeDevOtp, generateOtp } from "../utils/otp.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 
@@ -32,17 +23,9 @@ const issueTokens = async (user) => {
         phone: user.phone,
     };
     const accessToken = signAccessToken(payload);
-    const refreshToken = signRefreshToken(payload);
-    const decodedRefresh = verifyRefreshToken(refreshToken);
-    await storeRefreshToken(
-        user.id,
-        hashToken(refreshToken),
-        new Date(decodedRefresh.exp * 1000)
-    );
 
     return {
         accessToken,
-        refreshToken,
         user,
     };
 };
@@ -130,7 +113,10 @@ export const login = asyncHandler(async (req, res) => {
     }
 
     if (user.password_hash) {
-        const validPassword = await comparePassword(password, user.password_hash);
+        const validPassword = await comparePassword(
+            password,
+            user.password_hash
+        );
         if (!validPassword) {
             throw new AppError(401, "Invalid credentials");
         }
@@ -138,11 +124,7 @@ export const login = asyncHandler(async (req, res) => {
 
     const session = await issueTokens(user);
 
-    sendSuccess(
-        res,
-        session,
-        "Login successful"
-    );
+    sendSuccess(res, session, "Login successful");
 });
 
 export const verifyOtp = asyncHandler(async (req, res) => {
@@ -165,36 +147,8 @@ export const verifyOtp = asyncHandler(async (req, res) => {
     sendSuccess(res, session, "OTP verified successfully");
 });
 
-export const refresh = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-        throw new AppError(400, "refreshToken is required");
-    }
-
-    const payload = verifyRefreshToken(refreshToken);
-    const persistedToken = await findRefreshToken(hashToken(refreshToken));
-
-    if (!persistedToken) {
-        throw new AppError(401, "Refresh token is invalid");
-    }
-
-    await revokeRefreshToken(hashToken(refreshToken));
-    const user = await getUserById(payload.sub);
-    const session = await issueTokens(user);
-
-    sendSuccess(res, session, "Session refreshed");
-});
-
 export const logout = asyncHandler(async (req, res) => {
-    const { refreshToken, logoutAll } = req.body;
-
-    if (logoutAll) {
-        await revokeUserRefreshTokens(req.user.id);
-    } else if (refreshToken) {
-        await revokeRefreshToken(hashToken(refreshToken));
-    }
-
+    // Token is stateless - just clear it on client side
     sendSuccess(res, null, "Logged out successfully");
 });
 
