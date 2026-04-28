@@ -5,10 +5,7 @@ const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
     const params = [];
 
     if (!includeUnavailable) {
-        // Only use columns that actually exist in menu_items table
         filters.push("COALESCE(mi.is_available, 1) = 1");
-        // Removed is_deleted because it doesn't exist
-        // You can use `available` column if needed in future
     }
 
     if (category) {
@@ -139,7 +136,7 @@ export const getRestaurantMenu = async (
             mi.food_type,
             mi.preparation_time_mins,
             mi.is_available,
-            mi.image AS image_url,           // alias for frontend
+            mi.image AS image_url,          
             mi.rating,
             mi.popularity
         FROM menu_items mi
