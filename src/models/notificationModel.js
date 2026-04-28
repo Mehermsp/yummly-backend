@@ -17,7 +17,7 @@ export const listNotifications = async (userId, { limit = 40, offset = 0 }) => {
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
         `,
-        [userId, Number(limit), Number(offset)]
+        [userId, String(limit), String(offset)] // String() fix for mysql2
     );
 
     const [{ total }] = await query(

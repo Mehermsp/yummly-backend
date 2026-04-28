@@ -146,21 +146,21 @@ export const listWishlist = async (userId) =>
         SELECT
             w.id,
             w.id AS wishlist_id,
-            w.menu_id AS menu_item_id,           -- Fixed
+            w.menu_id AS menu_item_id,
             mi.id AS menu_id,
             mi.name,
             mi.price,
-            mi.image AS image,                   -- Fixed
+            mi.image AS image,
             mi.description,
             mi.category,
-            mi.discount AS discount,             -- Fixed
+            mi.discount AS discount,
             mi.restaurant_id,
             r.name AS restaurant_name
         FROM wishlists w
         INNER JOIN menu_items mi ON mi.id = w.menu_id
         INNER JOIN restaurants r ON r.id = mi.restaurant_id
         WHERE w.user_id = ?
-        ORDER BY w.created_at DESC
+        ORDER BY w.id DESC
         `,
         [userId]
     );

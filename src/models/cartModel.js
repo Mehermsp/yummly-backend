@@ -5,15 +5,15 @@ export const getCartForUser = async (userId) =>
         `
         SELECT
             c.id,
-            c.quantity,
-            c.unit_price,
-            c.total_price,
-            c.menu_id AS menu_item_id,           -- Changed
+            c.qty AS quantity,
+            c.price AS unit_price,
+            (c.price * c.qty) AS total_price,
+            c.menu_id AS menu_item_id,
             mi.name,
             mi.description,
-            mi.image AS image_url,               -- Changed
+            mi.image AS image_url,
             mi.price,
-            mi.discount AS discount_percent,     -- Changed
+            mi.discount AS discount_percent,
             r.id AS restaurant_id,
             r.name AS restaurant_name
         FROM carts c
@@ -29,7 +29,9 @@ export const getCartItemById = async (userId, cartItemId) =>
     getOne(
         `
         SELECT
-            c.*,
+            c.id,
+            c.qty AS quantity,
+            c.price AS unit_price,
             c.menu_id AS menu_item_id,
             mi.restaurant_id
         FROM carts c
@@ -93,19 +95,19 @@ export const upsertCartItem = async ({
         return query(
             `
             UPDATE carts
-            SET quantity = ?, unit_price = ?, total_price = ?
+            SET qty = ?, price = ?
             WHERE id = ? AND user_id = ?
             `,
-            [quantity, unitPrice, totalPrice, existing.id, userId]
+            [quantity, unitPrice, existing.id, userId]
         );
     }
 
     return query(
         `
-        INSERT INTO carts (user_id, menu_id, quantity, unit_price, total_price)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO carts (user_id, menu_id, qty, price)
+        VALUES (?, ?, ?, ?)
         `,
-        [userId, menuItemId, quantity, unitPrice, totalPrice]
+        [userId, menuItemId, quantity, unitPrice]
     );
 };
 
