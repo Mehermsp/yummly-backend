@@ -28,8 +28,8 @@ const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
 };
 
 export const listApprovedRestaurants = async ({
-    limit,
-    offset,
+    limit = 10,
+    offset = 0,
     search,
     city,
     sort = "rating",
@@ -58,6 +58,7 @@ export const listApprovedRestaurants = async ({
 
     const whereClause = filters.join(" AND ");
 
+    // Main query with LIMIT and OFFSET as strings (fixes the mysql2 bug)
     const items = await query(
         `
         SELECT
@@ -69,8 +70,8 @@ export const listApprovedRestaurants = async ({
             r.landmark AS area,
             r.address,
             r.pincode,
-            r.logo,                    -- Changed from logo_url
-            r.cover_image,             -- Changed from cover_image_url
+            r.logo,
+            r.cover_image,
             COALESCE(r.cover_image, r.logo) AS image_url,
             r.rating,
             r.total_orders,
@@ -83,15 +84,16 @@ export const listApprovedRestaurants = async ({
         ORDER BY r.is_open DESC, ${sortClause}
         LIMIT ? OFFSET ?
         `,
-        [...params, Number(limit), Number(offset)]
+        [...params, String(limit), String(offset)]   // ← Convert to string
     );
 
+    // Count query (no LIMIT/OFFSET)
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM restaurants r WHERE ${whereClause}`,
         params
     );
 
-    return { items, total };
+    return { items, total: Number(total) };
 };
 
 export const getRestaurantById = async (restaurantId) =>
