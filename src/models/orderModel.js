@@ -4,28 +4,27 @@ import { ORDER_STATUS } from "../constants/index.js";
 const orderSelect = `
     SELECT
         o.*,
-        o.user_id AS customer_id,                    -- Alias for frontend compatibility
-        o.delivery_address_id AS address_id,
-        o.customer_notes AS notes,
+        o.user_id AS customer_id,
+        o.address_id,
+        o.notes AS customer_notes,
+        o.notes,
         c.phone AS phone,
         r.name AS restaurant_name,
-        r.cover_image AS restaurant_image,           -- Correct column
+        r.cover_image AS restaurant_image,
         r.phone AS restaurant_phone,
         c.name AS customer_name,
         c.phone AS customer_phone,
         d.name AS delivery_partner_name,
         d.phone AS delivery_partner_phone,
-        a.door_no,
-        a.street,
-        a.area,
-        a.city,
-        a.state,
-        a.pincode,
-        a.landmark
+        o.door_no,
+        o.street,
+        o.area,
+        o.city,
+        o.state,
+        o.zip_code AS pincode
     FROM orders o
     INNER JOIN restaurants r ON r.id = o.restaurant_id
     INNER JOIN users c ON c.id = o.user_id
-    LEFT JOIN addresses a ON a.id = o.delivery_address_id
     LEFT JOIN users d ON d.id = o.delivery_partner_id
 `;
 
@@ -41,14 +40,15 @@ const statusTimestampFragments = {
 
 const summarizeCart = (cartItems) => {
     const subtotal = cartItems.reduce(
-        (sum, item) => sum + Number(item.unit_price) * Number(item.quantity),
+        (sum, item) =>
+            sum + Number(item.unit_price || 0) * Number(item.quantity || 0),
         0
     );
     const itemDiscount = cartItems.reduce(
         (sum, item) =>
             sum +
-            (Number(item.unit_price) *
-                Number(item.quantity) *
+            (Number(item.unit_price || 0) *
+                Number(item.quantity || 0) *
                 Number(item.discount_percent || 0)) /
                 100,
         0
@@ -58,6 +58,7 @@ const summarizeCart = (cartItems) => {
     const total = Number(
         (subtotal - itemDiscount + deliveryFee + taxAmount).toFixed(2)
     );
+
     const prepMinutes = Math.max(
         20,
         ...cartItems.map((item) => Number(item.preparation_time_mins || 20))
@@ -103,14 +104,12 @@ export const getOrderItems = async (orderId) =>
         `
         SELECT
             id,
-            menu_item_id,
-            menu_item_id AS menu_id,
+            menu_id AS menu_item_id,
             name,
             price,
-            quantity,
-            quantity AS qty,
+            qty AS quantity,
             discount_percent,
-            subtotal
+            (price * qty) AS subtotal
         FROM order_items
         WHERE order_id = ?
         ORDER BY id ASC
@@ -122,16 +121,11 @@ export const getOrderStatusLogs = async (orderId) =>
     query(
         `
         SELECT
-            old_status,
-            new_status,
-            new_status AS status,
-            changed_by,
-            changed_by_role,
-            notes,
-            created_at
+            status,
+            updated_at AS created_at
         FROM order_status_logs
         WHERE order_id = ?
-        ORDER BY created_at ASC
+        ORDER BY updated_at ASC
         `,
         [orderId]
     );
@@ -169,9 +163,7 @@ export const createOrder = async ({
             [customerId]
         );
 
-        if (!cartItems.length) {
-            throw new Error("Cart is empty");
-        }
+        if (!cartItems.length) throw new Error("Cart is empty");
 
         if (
             cartItems.some(
@@ -203,17 +195,17 @@ export const createOrder = async ({
                 order_number,
                 user_id,
                 restaurant_id,
-                delivery_address_id,
+                address_id,
                 status,
                 subtotal,
-                item_discount,
+                discount_amount,
                 delivery_fee,
                 tax_amount,
                 total,
                 payment_method,
                 payment_status,
                 estimated_delivery_time,
-                customer_notes
+                notes
             ) VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             `,
             [
@@ -238,25 +230,16 @@ export const createOrder = async ({
         for (const item of cartItems) {
             const lineSubtotal = Number(
                 (
-                    Number(item.unit_price) * Number(item.quantity) -
-                    (Number(item.unit_price) *
-                        Number(item.quantity) *
-                        Number(item.discount_percent || 0)) /
-                        100
+                    Number(item.unit_price) *
+                    Number(item.quantity) *
+                    (1 - Number(item.discount_percent || 0) / 100)
                 ).toFixed(2)
             );
 
             await connection.execute(
                 `
-                INSERT INTO order_items (
-                    order_id,
-                    menu_item_id,
-                    name,
-                    price,
-                    quantity,
-                    discount_percent,
-                    subtotal
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO order_items (order_id, menu_id, name, price, qty, discount_percent, subtotal)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 `,
                 [
                     orderId,
@@ -270,19 +253,13 @@ export const createOrder = async ({
             );
         }
 
-        // Log initial status
+        // Log status
         await connection.execute(
             `
-            INSERT INTO order_status_logs (
-                order_id,
-                old_status,
-                new_status,
-                changed_by,
-                changed_by_role,
-                notes
-            ) VALUES (?, NULL, 'placed', NULL, 'customer', ?)
+            INSERT INTO order_status_logs (order_id, status, updated_at)
+            VALUES (?, 'placed', CURRENT_TIMESTAMP)
             `,
-            [orderId, customerNotes || null]
+            [orderId]
         );
 
         // Clear cart
@@ -293,6 +270,7 @@ export const createOrder = async ({
         return orderId;
     });
 
+// Keep other functions as they are (they look mostly fine now)
 export const updateOrderStatus = async ({
     orderId,
     currentStatus,
