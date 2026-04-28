@@ -19,17 +19,17 @@ const parseBoolean = (value, fallback = false) => {
 };
 
 export const env = {
-    nodeEnv: process.env.NODE_ENV || "development",
-    port: Number(process.env.PORT || 5000),
+    nodeEnv: process.env.NODE_ENV,
+    port: Number(process.env.PORT),
     jwtAccessSecret:
-        process.env.JWT_ACCESS_SECRET || "dev-access-secret-change-me",
+        process.env.JWT_ACCESS_SECRET ,
     jwtAccessTtl: process.env.JWT_ACCESS_TTL || "",
     otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES || 5),
-    dbHost: process.env.DB_HOST || "127.0.0.1",
-    dbPort: Number(process.env.DB_PORT || 3306),
-    dbUser: process.env.DB_USER || "root",
-    dbPassword: process.env.DB_PASSWORD || process.env.DB_PASS || "",
-    dbName: process.env.DB_NAME || "tastiekit",
+    dbHost: process.env.DB_HOST ,
+    dbPort: Number(process.env.DB_PORT),
+    dbUser: process.env.DB_USER,
+    dbPassword: process.env.DB_PASSWORD,
+    dbName: process.env.DB_NAME,
     dbPoolLimit: Number(
         process.env.DB_CONNECTION_LIMIT || process.env.DB_POOL_LIMIT || 10
     ),
