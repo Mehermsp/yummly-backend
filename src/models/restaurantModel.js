@@ -57,6 +57,7 @@ export const listApprovedRestaurants = async ({
             : "r.rating DESC, r.total_orders DESC, r.created_at DESC";
 
     const whereClause = filters.join(" AND ");
+
     const items = await query(
         `
         SELECT
@@ -64,9 +65,7 @@ export const listApprovedRestaurants = async ({
             r.name,
             r.description,
             r.city,
-            r.state,
             r.landmark AS area,
-            r.landmark,
             r.address,
             r.pincode,
             r.logo_url,
@@ -81,10 +80,11 @@ export const listApprovedRestaurants = async ({
         FROM restaurants r
         WHERE ${whereClause}
         ORDER BY r.is_open DESC, ${sortClause}
-        LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+        LIMIT ? OFFSET ?
         `,
-        params
+        [...params, Number(limit), Number(offset)]
     );
+
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM restaurants r WHERE ${whereClause}`,
         params
