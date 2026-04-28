@@ -1,6 +1,6 @@
 import { query } from "../config/db.js";
 
-export const listNotifications = async (userId, { limit, offset }) => {
+export const listNotifications = async (userId, { limit = 40, offset = 0 }) => {
     const items = await query(
         `
         SELECT
@@ -8,8 +8,6 @@ export const listNotifications = async (userId, { limit, offset }) => {
             title,
             message,
             type,
-            related_entity_type,
-            related_entity_id,
             data,
             is_read,
             read_at,
@@ -17,16 +15,17 @@ export const listNotifications = async (userId, { limit, offset }) => {
         FROM notifications
         WHERE user_id = ?
         ORDER BY created_at DESC
-        LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+        LIMIT ? OFFSET ?
         `,
-        [userId]
+        [userId, Number(limit), Number(offset)]
     );
+
     const [{ total }] = await query(
         `SELECT COUNT(*) AS total FROM notifications WHERE user_id = ?`,
         [userId]
     );
 
-    return { items, total };
+    return { items, total: Number(total) };
 };
 
 export const markNotificationRead = async (userId, notificationId) =>
