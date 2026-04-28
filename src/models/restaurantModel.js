@@ -65,12 +65,13 @@ export const listApprovedRestaurants = async ({
             r.name,
             r.description,
             r.city,
+            r.state,
             r.landmark AS area,
             r.address,
             r.pincode,
-            r.logo_url,
-            r.cover_image_url,
-            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
+            r.logo,                    -- Changed from logo_url
+            r.cover_image,             -- Changed from cover_image_url
+            COALESCE(r.cover_image, r.logo) AS image_url,
             r.rating,
             r.total_orders,
             r.cuisines,
@@ -99,8 +100,8 @@ export const getRestaurantById = async (restaurantId) =>
         SELECT
             r.*,
             r.landmark AS area,
-            r.cover_image_url,
-            COALESCE(r.cover_image_url, r.logo_url) AS image_url,
+            r.cover_image,                    -- corrected
+            COALESCE(r.cover_image, r.logo) AS image_url,
             u.name AS owner_name,
             u.phone AS owner_phone
         FROM restaurants r
@@ -214,8 +215,8 @@ export const getRestaurantByOwnerId = async (ownerId) =>
         SELECT
             r.*,
             r.landmark AS area,
-            r.cover_image_url,
-            COALESCE(r.cover_image_url, r.logo_url) AS image_url
+            r.cover_image,
+            COALESCE(r.cover_image, r.logo) AS image_url
         FROM restaurants r
         WHERE r.owner_id = ?
         LIMIT 1
