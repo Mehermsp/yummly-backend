@@ -6,7 +6,6 @@ const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
 
     if (!includeUnavailable) {
         filters.push("COALESCE(mi.is_available, 1) = 1");
-        filters.push("COALESCE(mi.is_deleted, 0) = 0");
     }
 
     if (category) {
@@ -28,8 +27,8 @@ const buildMenuFilters = ({ includeUnavailable = true, category, search }) => {
 };
 
 export const listApprovedRestaurants = async ({
-    limit,
-    offset,
+    limit = 10,
+    offset = 0,
     search,
     city,
     sort = "rating",
@@ -69,8 +68,8 @@ export const listApprovedRestaurants = async ({
             r.landmark AS area,
             r.address,
             r.pincode,
-            r.logo,                    -- Changed from logo_url
-            r.cover_image,             -- Changed from cover_image_url
+            r.logo,
+            r.cover_image,
             COALESCE(r.cover_image, r.logo) AS image_url,
             r.rating,
             r.total_orders,
@@ -83,7 +82,7 @@ export const listApprovedRestaurants = async ({
         ORDER BY r.is_open DESC, ${sortClause}
         LIMIT ? OFFSET ?
         `,
-        [...params, Number(limit), Number(offset)]
+        [...params, String(limit), String(offset)] // ← String() is important
     );
 
     const [{ total }] = await query(
@@ -91,7 +90,7 @@ export const listApprovedRestaurants = async ({
         params
     );
 
-    return { items, total };
+    return { items, total: Number(total) };
 };
 
 export const getRestaurantById = async (restaurantId) =>
@@ -130,14 +129,14 @@ export const getRestaurantMenu = async (
             mi.name,
             mi.description,
             mi.price,
-            mi.discount_percent,
+            mi.discount,
             mi.category,
             mi.cuisine_type,
             mi.meal_type,
             mi.food_type,
             mi.preparation_time_mins,
             mi.is_available,
-            mi.image_url,
+            mi.image AS image_url,          
             mi.rating,
             mi.popularity
         FROM menu_items mi
@@ -274,7 +273,7 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
             name = ?,
             description = ?,
             price = ?,
-            discount_percent = ?,
+            discount = ?,
             category = ?,
             cuisine_type = ?,
             meal_type = ?,
