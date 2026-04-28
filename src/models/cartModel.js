@@ -9,7 +9,8 @@ export const getCartForUser = async (userId) =>
             c.price AS unit_price,
             (c.price * c.qty) AS total_price,
             c.menu_id AS menu_item_id,
-            mi.name,
+            c.name,                              -- Added
+            mi.name AS menu_name,
             mi.description,
             mi.image AS image_url,
             mi.price,
@@ -102,12 +103,15 @@ export const upsertCartItem = async ({
         );
     }
 
+    // FIXED: Include 'name' when inserting new cart item
     return query(
         `
-        INSERT INTO carts (user_id, menu_id, qty, price)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO carts (user_id, menu_id, name, qty, price)
+        SELECT ?, mi.id, mi.name, ?, ?
+        FROM menu_items mi
+        WHERE mi.id = ?
         `,
-        [userId, menuItemId, quantity, unitPrice]
+        [userId, quantity, unitPrice, menuItemId]
     );
 };
 
