@@ -144,29 +144,26 @@ export const createOrder = async ({
     customerNotes,
 }) =>
     withTransaction(async (connection) => {
+        // FIXED: Use correct table name 'carts' and correct column names
         const [cartItems] = await connection.execute(
             `
             SELECT
                 c.id,
                 c.user_id,
-                c.menu_item_id,
-                c.quantity,
-                c.unit_price,
-                c.total_price,
-                COALESCE(c.unit_price, mi.price) AS item_price,
-                COALESCE(c.quantity, 1) AS qty,
-                COALESCE(c.total_price, c.unit_price * c.quantity) AS line_total,
-                COALESCE(c.name, mi.name) AS name,
+                c.menu_id AS menu_item_id,
+                c.qty AS quantity,
+                c.price AS unit_price,
+                (c.price * c.qty) AS total_price,
+                c.name,
                 mi.restaurant_id,
                 mi.description,
-                mi.discount_percent,
+                mi.discount AS discount_percent,
                 mi.preparation_time_mins,
                 COALESCE(mi.is_available, 1) AS is_available,
-                COALESCE(mi.is_deleted, 0) AS is_deleted,
                 r.is_active,
                 r.is_open
-            FROM cart_items c
-            INNER JOIN menu_items mi ON mi.id = c.menu_item_id
+            FROM carts c
+            INNER JOIN menu_items mi ON mi.id = c.menu_id
             INNER JOIN restaurants r ON r.id = mi.restaurant_id
             WHERE c.user_id = ?
             ORDER BY c.id ASC
@@ -180,11 +177,7 @@ export const createOrder = async ({
 
         if (
             cartItems.some(
-                (item) =>
-                    !item.is_available ||
-                    item.is_deleted ||
-                    !item.is_active ||
-                    !item.is_open
+                (item) => !item.is_available || !item.is_active || !item.is_open
             )
         ) {
             throw new Error("One or more cart items are unavailable right now");
@@ -246,6 +239,7 @@ export const createOrder = async ({
 
         const orderId = orderResult.insertId;
 
+        // Insert order items
         for (const item of cartItems) {
             const lineSubtotal = Number(
                 (
@@ -281,6 +275,7 @@ export const createOrder = async ({
             );
         }
 
+        // Log status
         await connection.execute(
             `
             INSERT INTO order_status_logs (
@@ -295,7 +290,8 @@ export const createOrder = async ({
             [orderId, customerNotes || null]
         );
 
-        await connection.execute(`DELETE FROM cart_items WHERE user_id = ?`, [
+        // Clear cart after successful order
+        await connection.execute(`DELETE FROM carts WHERE user_id = ?`, [
             customerId,
         ]);
 
