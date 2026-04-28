@@ -4,13 +4,12 @@ import { ORDER_STATUS } from "../constants/index.js";
 const orderSelect = `
     SELECT
         o.*,
-        o.customer_id AS user_id,
+        o.user_id AS customer_id,                    -- Alias for frontend compatibility
         o.delivery_address_id AS address_id,
         o.customer_notes AS notes,
-        o.customer_notes,
         c.phone AS phone,
         r.name AS restaurant_name,
-        r.cover_image_url AS restaurant_image,
+        r.cover_image AS restaurant_image,           -- Correct column
         r.phone AS restaurant_phone,
         c.name AS customer_name,
         c.phone AS customer_phone,
@@ -25,7 +24,7 @@ const orderSelect = `
         a.landmark
     FROM orders o
     INNER JOIN restaurants r ON r.id = o.restaurant_id
-    INNER JOIN users c ON c.id = o.customer_id
+    INNER JOIN users c ON c.id = o.user_id
     LEFT JOIN addresses a ON a.id = o.delivery_address_id
     LEFT JOIN users d ON d.id = o.delivery_partner_id
 `;
@@ -86,10 +85,10 @@ export const listCustomerOrders = async (customerId, status) =>
             o.payment_status,
             o.created_at,
             r.name AS restaurant_name,
-            r.cover_image_url AS restaurant_image
+            r.cover_image AS restaurant_image
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
-        WHERE o.customer_id = ?
+        WHERE o.user_id = ?
           AND (? IS NULL OR o.status = ?)
         ORDER BY o.created_at DESC
         `,
@@ -144,7 +143,6 @@ export const createOrder = async ({
     customerNotes,
 }) =>
     withTransaction(async (connection) => {
-        // FIXED: Use correct table name 'carts' and correct column names
         const [cartItems] = await connection.execute(
             `
             SELECT
@@ -184,9 +182,6 @@ export const createOrder = async ({
         }
 
         const restaurantId = cartItems[0].restaurant_id;
-        if (cartItems.some((item) => item.restaurant_id !== restaurantId)) {
-            throw new Error("Cart must contain items from only one restaurant");
-        }
 
         const {
             subtotal,
@@ -206,7 +201,7 @@ export const createOrder = async ({
             `
             INSERT INTO orders (
                 order_number,
-                customer_id,
+                user_id,
                 restaurant_id,
                 delivery_address_id,
                 status,
@@ -275,7 +270,7 @@ export const createOrder = async ({
             );
         }
 
-        // Log status
+        // Log initial status
         await connection.execute(
             `
             INSERT INTO order_status_logs (
@@ -290,7 +285,7 @@ export const createOrder = async ({
             [orderId, customerNotes || null]
         );
 
-        // Clear cart after successful order
+        // Clear cart
         await connection.execute(`DELETE FROM carts WHERE user_id = ?`, [
             customerId,
         ]);
@@ -307,15 +302,11 @@ export const updateOrderStatus = async ({
     notes,
     deliveryPartnerId,
 }) => {
-    const statusTimestampFragment =
-        statusTimestampFragments[nextStatus] || "";
+    const statusTimestampFragment = statusTimestampFragments[nextStatus] || "";
 
     const paymentSet =
         nextStatus === ORDER_STATUS.DELIVERED
-            ? `, payment_status = CASE
-                    WHEN payment_method = 'cash' THEN 'completed'
-                    ELSE payment_status
-               END`
+            ? `, payment_status = CASE WHEN payment_method = 'cash' THEN 'completed' ELSE payment_status END`
             : "";
 
     const deliveryPartnerSet =
@@ -336,9 +327,7 @@ export const updateOrderStatus = async ({
     `;
 
     const params = [nextStatus, notes || null];
-    if (deliveryPartnerId !== undefined) {
-        params.push(deliveryPartnerId || null);
-    }
+    if (deliveryPartnerId !== undefined) params.push(deliveryPartnerId || null);
     params.push(orderId);
 
     await query(sql, params);
@@ -346,12 +335,7 @@ export const updateOrderStatus = async ({
     await query(
         `
         INSERT INTO order_status_logs (
-            order_id,
-            old_status,
-            new_status,
-            changed_by,
-            changed_by_role,
-            notes
+            order_id, old_status, new_status, changed_by, changed_by_role, notes
         ) VALUES (?, ?, ?, ?, ?, ?)
         `,
         [
@@ -382,6 +366,7 @@ export const cancelOrder = async ({
     });
 };
 
+// Other functions (kept as they were mostly correct)
 export const getDeliveryOpenOrders = async () =>
     query(
         `
@@ -497,7 +482,7 @@ export const listRestaurantOrders = async (restaurantId, status) =>
             a.city,
             a.pincode
         FROM orders o
-        INNER JOIN users c ON c.id = o.customer_id
+        INNER JOIN users c ON c.id = o.user_id
         LEFT JOIN addresses a ON a.id = o.delivery_address_id
         WHERE o.restaurant_id = ?
           AND (? IS NULL OR o.status = ?)
@@ -538,7 +523,7 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id
-        INNER JOIN users c ON c.id = o.customer_id
+        INNER JOIN users c ON c.id =o.user_id
         LEFT JOIN addresses a ON a.id = o.delivery_address_id
         WHERE da.delivery_partner_id = ?
         ORDER BY da.assigned_at DESC
@@ -546,7 +531,11 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
         [deliveryPartnerId]
     );
 
-export const adminAssignOrder = async ({ orderId, deliveryPartnerId, adminId }) =>
+export const adminAssignOrder = async ({
+    orderId,
+    deliveryPartnerId,
+    adminId,
+}) =>
     withTransaction(async (connection) => {
         const [existing] = await connection.execute(
             `
@@ -612,10 +601,12 @@ export const getDeliveryPartnerStats = async (deliveryPartnerId) => {
         [today, today, deliveryPartnerId]
     );
 
-    return rows[0] || {
-        total_deliveries: 0,
-        today_deliveries: 0,
-        today_earnings: 0,
-        avg_rating: 0,
-    };
+    return (
+        rows[0] || {
+            total_deliveries: 0,
+            today_deliveries: 0,
+            today_earnings: 0,
+            avg_rating: 0,
+        }
+    );
 };
