@@ -174,7 +174,7 @@ export const createOrder = async ({
 
         // Fetch address (using zip_code to match your schema)
         const [addressRows] = await connection.execute(
-            `SELECT door_no, street, area, city, state, zip_code FROM addresses WHERE id = ? AND user_id = ? LIMIT 1`,
+            `SELECT door_no, street, area, city, state, pincode FROM addresses WHERE id = ? AND user_id = ? LIMIT 1`,
             [addressId, customerId]
         );
 
@@ -222,7 +222,7 @@ export const createOrder = async ({
                 address.area,
                 address.city,
                 address.state,
-                address.zip_code,
+                address.pincode,
             ]
         );
 
