@@ -49,7 +49,7 @@ const summarizeCart = (cartItems) => {
             sum +
             (Number(item.unit_price || 0) *
                 Number(item.quantity || 0) *
-                Number(item.discount_percent || 0)) /
+                Number(item.discount || 0)) /
                 100,
         0
     );
@@ -108,7 +108,7 @@ export const getOrderItems = async (orderId) =>
             name,
             price,
             qty AS quantity,
-            discount_percent,
+            discount,
             (price * qty) AS subtotal
         FROM order_items
         WHERE order_id = ?
@@ -149,7 +149,7 @@ export const createOrder = async ({
                 c.name,
                 mi.restaurant_id,
                 mi.description,
-                mi.discount AS discount_percent,
+                mi.discount AS discount,
                 mi.preparation_time_mins,
                 COALESCE(mi.is_available, 1) AS is_available,
                 r.is_active,
@@ -232,13 +232,13 @@ export const createOrder = async ({
                 (
                     Number(item.unit_price) *
                     Number(item.quantity) *
-                    (1 - Number(item.discount_percent || 0) / 100)
+                    (1 - Number(item.discount || 0) / 100)
                 ).toFixed(2)
             );
 
             await connection.execute(
                 `
-                INSERT INTO order_items (order_id, menu_id, name, price, qty, discount_percent, subtotal)
+                INSERT INTO order_items (order_id, menu_id, name, price, qty, discount, subtotal)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 `,
                 [
@@ -247,7 +247,7 @@ export const createOrder = async ({
                     item.name,
                     item.unit_price,
                     item.quantity,
-                    item.discount_percent || 0,
+                    item.discount|| 0,
                     lineSubtotal,
                 ]
             );
