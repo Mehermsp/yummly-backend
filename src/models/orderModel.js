@@ -110,8 +110,8 @@ export const getOrderItems = async (orderId) =>
             name,
             price,
             qty AS quantity,
-            discount,
-            subtotal
+            -- Calculate subtotal here since the column is missing in the DB
+            (price * qty) AS subtotal 
         FROM order_items
         WHERE order_id = ?
         ORDER BY id ASC
