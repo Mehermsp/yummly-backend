@@ -347,34 +347,65 @@ export const getRestaurantDashboard = async (restaurantId) => {
     return { metrics, recentOrders };
 };
 
-export const listRestaurantOrders = async (restaurantId, status) =>
-    query(
-        `
-        SELECT
-            o.id,
-            o.order_number,
-            o.status,
-            o.total,
-            o.payment_status,
-            o.created_at,
-            o.customer_notes,
-            c.name AS customer_name,
-            c.phone AS customer_phone,
-            a.door_no,
-            a.street,
-            a.area,
-            a.city,
-            a.state,
-            a.pincode
-        FROM orders o
-        INNER JOIN users c ON c.id = o.customer_id
-        LEFT JOIN addresses a ON a.id = o.delivery_address_id
-        WHERE o.restaurant_id = ?
-          AND (? IS NULL OR o.status = ?)
-        ORDER BY o.created_at DESC
-        `,
-        [restaurantId, status || null, status || null]
-    );
+export const listRestaurantOrders = async (restaurantId, status) => {
+    try {
+        return await query(
+            `
+            SELECT
+                o.id,
+                o.order_number,
+                o.status,
+                o.total,
+                o.payment_status,
+                o.created_at,
+                o.customer_notes,
+                c.name AS customer_name,
+                c.phone AS customer_phone,
+                a.door_no,
+                a.street,
+                a.area,
+                a.city,
+                a.state,
+                a.pincode
+            FROM orders o
+            INNER JOIN users c ON c.id = o.customer_id
+            LEFT JOIN addresses a ON a.id = o.delivery_address_id
+            WHERE o.restaurant_id = ?
+              AND (? IS NULL OR o.status = ?)
+            ORDER BY o.created_at DESC
+            `,
+            [restaurantId, status || null, status || null]
+        );
+    } catch {
+        // Backward compatibility for older deployed schemas.
+        return query(
+            `
+            SELECT
+                o.id,
+                o.order_number,
+                o.status,
+                o.total,
+                o.payment_status,
+                o.created_at,
+                o.notes AS customer_notes,
+                c.name AS customer_name,
+                c.phone AS customer_phone,
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                NULL AS state,
+                o.zip_code AS pincode
+            FROM orders o
+            INNER JOIN users c ON c.id = o.user_id
+            WHERE o.restaurant_id = ?
+              AND (? IS NULL OR o.status = ?)
+            ORDER BY o.created_at DESC
+            `,
+            [restaurantId, status || null, status || null]
+        );
+    }
+};
 
 export const listApplications = async (status) =>
     query(
