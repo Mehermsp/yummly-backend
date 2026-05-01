@@ -1,12 +1,14 @@
 import { Router } from "express";
 import * as adminController from "../controllers/adminController.js";
-import { authenticate, requireRole } from "../middleware/auth.js";
+import { ROLES } from "../constants/index.js";
+import { authenticate } from "../middleware/authenticate.js";
+import { authorize } from "../middleware/authorize.js";
 
 const router = Router();
 
 // Apply authentication and admin role check to all routes
 router.use(authenticate);
-router.use(requireRole("admin"));
+router.use(authorize(ROLES.ADMIN));
 
 // Dashboard & Statistics
 router.get("/statistics", adminController.getStatistics);
@@ -25,6 +27,10 @@ router.put("/restaurants/:id", adminController.updateRestaurant);
 
 // Orders Management
 router.get("/orders", adminController.getOrders);
+router.get("/orders/pending", (req, res) => {
+    req.query.status = "pending";
+    return adminController.getOrders(req, res);
+});
 router.get("/orders/:id", adminController.getOrderById);
 router.put("/orders/:id/status", adminController.updateOrderStatus);
 router.put("/orders/:id/assign", adminController.assignDeliveryPartner);

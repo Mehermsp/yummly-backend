@@ -3,11 +3,20 @@ import { query } from "../config/db.js";
 // Get Dashboard Statistics
 export const getStatistics = async (req, res) => {
     try {
-        const [restaurants] = await query("SELECT COUNT(*) as total FROM restaurants WHERE is_approved = 1 OR is_active = 1");
-        const [applications] = await query("SELECT COUNT(*) as total FROM restaurant_applications WHERE status = 'pending'");
+        // Count active restaurants (is_approved = 1 OR is_active = 1)
+        const [restaurants] = await query(
+            "SELECT COUNT(*) as total FROM restaurants WHERE is_approved = 1 OR is_active = 1"
+        );
+
+        // Count pending applications
+        const [applications] = await query(
+            "SELECT COUNT(*) as total FROM restaurant_applications WHERE status = 'pending'"
+        );
+
+        // Count all orders
         const [orders] = await query("SELECT COUNT(*) as total FROM orders");
 
-        // Count active delivery partners (users with role that can deliver)
+        // Count active delivery partners (users with role 'delivery' that are available)
         const [partners] = await query(
             "SELECT COUNT(*) as total FROM users WHERE role = 'delivery' AND is_available = 1"
         );
@@ -26,12 +35,12 @@ export const getStatistics = async (req, res) => {
         `);
 
         res.json({
-            total_restaurants: restaurants[0]?.total || 0,
-            pending_applications: applications[0]?.total || 0,
-            total_orders: orders[0]?.total || 0,
-            total_revenue: revenue[0]?.total || 0,
-            active_delivery_partners: partners[0]?.total || 0,
-            orders_today: ordersToday[0]?.total || 0
+            total_restaurants: parseInt(restaurants[0]?.total) || 0,
+            pending_applications: parseInt(applications[0]?.total) || 0,
+            total_orders: parseInt(orders[0]?.total) || 0,
+            total_revenue: parseFloat(revenue[0]?.total) || 0,
+            active_delivery_partners: parseInt(partners[0]?.total) || 0,
+            orders_today: parseInt(ordersToday[0]?.total) || 0,
         });
     } catch (error) {
         console.error("Error fetching statistics:", error);
@@ -84,7 +93,8 @@ export const getApplications = async (req, res) => {
 export const getApplicationById = async (req, res) => {
     try {
         const { id } = req.params;
-        const applications = await query(`
+        const applications = await query(
+            `
             SELECT 
                 id,
                 owner_id as user_id,
@@ -113,7 +123,9 @@ export const getApplicationById = async (req, res) => {
                 updated_at
             FROM restaurant_applications 
             WHERE id = ?
-        `, [id]);
+        `,
+            [id]
+        );
 
         if (applications.length === 0) {
             return res.status(404).json({ error: "Application not found" });
@@ -155,23 +167,43 @@ export const approveApplication = async (req, res) => {
         );
 
         // Create restaurant record
-        await query(`
+        await query(
+            `
             INSERT INTO restaurants (
                 user_id, owner_id, name, email, phone, 
                 description, address, city, state, pincode, landmark,
                 cuisines, open_time, close_time, days_open,
-                fssai, gst, pan, logo, is_approved, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
-        `, [
-            app.owner_id, app.owner_id, app.restaurant_name, app.email, app.phone,
-            app.description || '', app.address, app.city, app.state || '', app.pincode, app.landmark || '',
-            app.cuisines, app.open_time, app.close_time, app.days_open || '',
-            app.fssai, app.gst, app.pan, app.logo || ''
-        ]);
+                fssai, gst, pan, logo, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `,
+            [
+                app.owner_id,
+                app.owner_id,
+                app.restaurant_name,
+                app.email,
+                app.phone,
+                app.description || "",
+                app.address,
+                app.city,
+                app.state || "",
+                app.pincode,
+                app.landmark || "",
+                app.cuisines,
+                app.open_time,
+                app.close_time,
+                app.days_open || "",
+                app.fssai,
+                app.gst,
+                app.pan,
+                app.logo || "",
+            ]
+        );
 
         await query("COMMIT");
 
-        res.json({ message: "Application approved and restaurant created successfully" });
+        res.json({
+            message: "Application approved and restaurant created successfully",
+        });
     } catch (error) {
         await query("ROLLBACK");
         console.error("Error approving application:", error);
@@ -185,11 +217,14 @@ export const rejectApplication = async (req, res) => {
         const { id } = req.params;
         const { rejection_reason } = req.body;
 
-        await query(`
+        await query(
+            `
             UPDATE restaurant_applications 
             SET status = 'rejected', review_notes = ?, reviewed_at = NOW()
             WHERE id = ?
-        `, [rejection_reason, id]);
+        `,
+            [rejection_reason, id]
+        );
 
         res.json({ message: "Application rejected successfully" });
     } catch (error) {
@@ -226,7 +261,6 @@ export const getRestaurants = async (req, res) => {
                 r.gst as gst_number,
                 r.pan,
                 r.rating,
-                r.is_approved,
                 r.is_open,
                 r.is_active,
                 r.total_orders,
@@ -243,10 +277,9 @@ export const getRestaurants = async (req, res) => {
         `);
 
         // Map is_active to status for consistency
-        const result = restaurants.map(r => ({
+        const result = restaurants.map((r) => ({
             ...r,
-            status: r.is_active !== null ? (r.is_active ? 'active' : 'inactive') :
-                    (r.is_approved ? 'active' : 'inactive')
+            status: r.is_active ? "active" : "inactive",
         }));
 
         res.json(result);
@@ -260,7 +293,8 @@ export const getRestaurants = async (req, res) => {
 export const getRestaurantById = async (req, res) => {
     try {
         const { id } = req.params;
-        const restaurants = await query(`
+        const restaurants = await query(
+            `
             SELECT 
                 r.id,
                 r.name as restaurant_name,
@@ -285,7 +319,6 @@ export const getRestaurantById = async (req, res) => {
                 r.gst as gst_number,
                 r.pan,
                 r.rating,
-                r.is_approved,
                 r.is_open,
                 r.is_active,
                 r.total_orders,
@@ -298,7 +331,9 @@ export const getRestaurantById = async (req, res) => {
             FROM restaurants r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE r.id = ?
-        `, [id]);
+        `,
+            [id]
+        );
 
         if (restaurants.length === 0) {
             return res.status(404).json({ error: "Restaurant not found" });
@@ -317,8 +352,11 @@ export const updateRestaurantStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const isActive = status === 'active' ? 1 : 0;
-        await query("UPDATE restaurants SET is_active = ? WHERE id = ?", [isActive, id]);
+        const isActive = status === "active" ? 1 : 0;
+        await query("UPDATE restaurants SET is_active = ? WHERE id = ?", [
+            isActive,
+            id,
+        ]);
         res.json({ message: "Restaurant status updated successfully" });
     } catch (error) {
         console.error("Error updating restaurant status:", error);
@@ -332,10 +370,15 @@ export const updateRestaurant = async (req, res) => {
         const { id } = req.params;
         const data = req.body;
 
-        const fields = Object.keys(data).map(key => `${key} = ?`).join(', ');
+        const fields = Object.keys(data)
+            .map((key) => `${key} = ?`)
+            .join(", ");
         const values = Object.values(data);
 
-        await query(`UPDATE restaurants SET ${fields} WHERE id = ?`, [...values, id]);
+        await query(`UPDATE restaurants SET ${fields} WHERE id = ?`, [
+            ...values,
+            id,
+        ]);
         res.json({ message: "Restaurant updated successfully" });
     } catch (error) {
         console.error("Error updating restaurant:", error);
@@ -354,10 +397,12 @@ export const getOrders = async (req, res) => {
                 o.user_id,
                 o.restaurant_id,
                 o.total,
+                o.total as total_amount,
                 o.subtotal,
                 o.discount_amount,
                 o.delivery_fee,
                 o.tax_amount,
+                o.tax_amount as tax,
                 o.status,
                 o.payment_method,
                 o.payment_status,
@@ -377,28 +422,27 @@ export const getOrders = async (req, res) => {
                 r.address as restaurant_address,
                 dp.name as delivery_partner_name,
                 dp.phone as delivery_partner_phone,
-                a.door_no,
-                a.street,
-                a.area,
-                a.city,
-                a.state,
-                a.pincode,
-                a.landmark
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                o.state,
+                o.zip_code as pincode,
+                o.phone as delivery_phone
             FROM orders o
             LEFT JOIN users cu ON o.user_id = cu.id
             LEFT JOIN restaurants r ON o.restaurant_id = r.id
             LEFT JOIN users dp ON o.delivery_partner_id = dp.id
-            LEFT JOIN addresses a ON o.address_id = a.id
             WHERE 1=1
         `;
 
         const params = [];
-        if (status && status !== 'all') {
-            sql += ' AND o.status = ?';
+        if (status && status !== "all") {
+            sql += " AND o.status = ?";
             params.push(status);
         }
 
-        sql += ' ORDER BY o.created_at DESC';
+        sql += " ORDER BY o.created_at DESC";
         if (limit) {
             sql += ` LIMIT ${parseInt(limit)}`;
         }
@@ -406,10 +450,18 @@ export const getOrders = async (req, res) => {
         const orders = await query(sql, params);
 
         // Format delivery address
-        const formattedOrders = orders.map(o => ({
+        const formattedOrders = orders.map((o) => ({
             ...o,
-            delivery_address: [o.door_no, o.street, o.area, o.city, o.state, o.pincode]
-                .filter(Boolean).join(', ')
+            delivery_address: [
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                o.state,
+                o.pincode,
+            ]
+                .filter(Boolean)
+                .join(", "),
         }));
 
         res.json(formattedOrders);
@@ -423,17 +475,20 @@ export const getOrders = async (req, res) => {
 export const getOrderById = async (req, res) => {
     try {
         const { id } = req.params;
-        const orders = await query(`
+        const orders = await query(
+            `
             SELECT 
                 o.id,
                 o.order_number,
                 o.user_id,
                 o.restaurant_id,
                 o.total,
+                o.total as total_amount,
                 o.subtotal,
                 o.discount_amount,
                 o.delivery_fee,
                 o.tax_amount,
+                o.tax_amount as tax,
                 o.status,
                 o.payment_method,
                 o.payment_status,
@@ -452,32 +507,44 @@ export const getOrderById = async (req, res) => {
                 r.address as restaurant_address,
                 dp.name as delivery_partner_name,
                 dp.phone as delivery_partner_phone,
-                a.door_no,
-                a.street,
-                a.area,
-                a.city,
-                a.state,
-                a.pincode,
-                a.landmark
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                o.state,
+                o.zip_code as pincode,
+                o.phone as delivery_phone
             FROM orders o
             LEFT JOIN users cu ON o.user_id = cu.id
             LEFT JOIN restaurants r ON o.restaurant_id = r.id
             LEFT JOIN users dp ON o.delivery_partner_id = dp.id
-            LEFT JOIN addresses a ON o.address_id = a.id
             WHERE o.id = ?
-        `, [id]);
+        `,
+            [id]
+        );
 
         if (orders.length === 0) {
             return res.status(404).json({ error: "Order not found" });
         }
 
         // Get order items
-        const items = await query("SELECT * FROM order_items WHERE order_id = ?", [id]);
+        const items = await query(
+            "SELECT * FROM order_items WHERE order_id = ?",
+            [id]
+        );
 
         const order = orders[0];
         order.items = items;
-        order.delivery_address = [order.door_no, order.street, order.area, order.city, order.state, order.pincode]
-            .filter(Boolean).join(', ');
+        order.delivery_address = [
+            order.door_no,
+            order.street,
+            order.area,
+            order.city,
+            order.state,
+            order.pincode,
+        ]
+            .filter(Boolean)
+            .join(", ");
 
         res.json(order);
     } catch (error) {
@@ -495,14 +562,19 @@ export const updateOrderStatus = async (req, res) => {
         let updateData = { status };
 
         // If delivered, set delivered_at
-        if (status === 'delivered') {
+        if (status === "delivered") {
             updateData.delivered_at = new Date();
         }
 
-        const fields = Object.keys(updateData).map(key => `${key} = ?`).join(', ');
+        const fields = Object.keys(updateData)
+            .map((key) => `${key} = ?`)
+            .join(", ");
         const values = Object.values(updateData);
 
-        await query(`UPDATE orders SET ${fields} WHERE id = ?`, [...values, id]);
+        await query(`UPDATE orders SET ${fields} WHERE id = ?`, [
+            ...values,
+            id,
+        ]);
         res.json({ message: "Order status updated successfully" });
     } catch (error) {
         console.error("Error updating order status:", error);
@@ -525,11 +597,14 @@ export const assignDeliveryPartner = async (req, res) => {
         );
 
         // Create delivery assignment record
-        await query(`
+        await query(
+            `
             INSERT INTO delivery_assignments (
                 order_id, delivery_partner_id, status, assigned_at
             ) VALUES (?, ?, "assigned", NOW())
-        `, [id, delivery_partner_id]);
+        `,
+            [id, delivery_partner_id]
+        );
 
         await query("COMMIT");
 
@@ -565,14 +640,14 @@ export const getDeliveryPartners = async (req, res) => {
         `);
 
         // Map is_available to status
-        const result = partners.map(p => ({
+        const result = partners.map((p) => ({
             ...p,
-            status: p.is_available ? 'active' : 'inactive',
-            vehicle_type: 'bike',
+            status: p.is_available ? "active" : "inactive",
+            vehicle_type: "bike",
             total_deliveries: p.total_deliveries || 0,
             completed_orders: p.completed_orders || 0,
-            rating: p.rating ? parseFloat(p.rating).toFixed(1) : 'N/A',
-            pending_assignments: p.pending_assignments || 0
+            rating: p.rating ? parseFloat(p.rating).toFixed(1) : "N/A",
+            pending_assignments: p.pending_assignments || 0,
         }));
 
         res.json(result);
@@ -586,7 +661,8 @@ export const getDeliveryPartners = async (req, res) => {
 export const getDeliveryPartnerById = async (req, res) => {
     try {
         const { id } = req.params;
-        const partners = await query(`
+        const partners = await query(
+            `
             SELECT 
                 u.id,
                 u.name,
@@ -602,17 +678,23 @@ export const getDeliveryPartnerById = async (req, res) => {
                 (SELECT AVG(rating) FROM reviews WHERE delivery_rating IS NOT NULL AND user_id = u.id) as rating
             FROM users u
             WHERE u.id = ? AND u.role = 'delivery'
-        `, [id]);
+        `,
+            [id]
+        );
 
         if (partners.length === 0) {
-            return res.status(404).json({ error: "Delivery partner not found" });
+            return res
+                .status(404)
+                .json({ error: "Delivery partner not found" });
         }
 
         const partner = partners[0];
-        partner.status = partner.is_available ? 'active' : 'inactive';
+        partner.status = partner.is_available ? "active" : "inactive";
         partner.total_deliveries = partner.total_deliveries || 0;
         partner.completed_orders = partner.completed_orders || 0;
-        partner.rating = partner.rating ? parseFloat(partner.rating).toFixed(1) : 'N/A';
+        partner.rating = partner.rating
+            ? parseFloat(partner.rating).toFixed(1)
+            : "N/A";
 
         res.json(partner);
     } catch (error) {
@@ -627,12 +709,17 @@ export const updateDeliveryPartnerStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const isAvailable = status === 'active' ? 1 : 0;
-        await query('UPDATE users SET is_available = ? WHERE id = ? AND role = "delivery"', [isAvailable, id]);
+        const isAvailable = status === "active" ? 1 : 0;
+        await query(
+            'UPDATE users SET is_available = ? WHERE id = ? AND role = "delivery"',
+            [isAvailable, id]
+        );
         res.json({ message: "Delivery partner status updated successfully" });
     } catch (error) {
         console.error("Error updating delivery partner status:", error);
-        res.status(500).json({ error: "Failed to update delivery partner status" });
+        res.status(500).json({
+            error: "Failed to update delivery partner status",
+        });
     }
 };
 
@@ -642,7 +729,9 @@ export const updateDeliveryPartner = async (req, res) => {
         const { id } = req.params;
         const data = req.body;
 
-        const fields = Object.keys(data).map(key => `${key} = ?`).join(', ');
+        const fields = Object.keys(data)
+            .map((key) => `${key} = ?`)
+            .join(", ");
         const values = Object.values(data);
 
         await query(`UPDATE users SET ${fields} WHERE id = ?`, [...values, id]);
@@ -656,20 +745,22 @@ export const updateDeliveryPartner = async (req, res) => {
 // Settings - General
 export const getGeneralSettings = async (req, res) => {
     try {
-        const settings = await query('SELECT * FROM admin_settings WHERE setting_key LIKE "general_%"');
+        const settings = await query(
+            'SELECT * FROM admin_settings WHERE setting_key LIKE "general_%"'
+        );
         const result = {};
-        settings.forEach(s => {
-            result[s.setting_key.replace('general_', '')] = s.setting_value;
+        settings.forEach((s) => {
+            result[s.setting_key.replace("general_", "")] = s.setting_value;
         });
         res.json(result);
     } catch (error) {
         console.error("Error fetching general settings:", error);
         res.json({
-            platform_name: 'TastieKit',
-            support_email: 'support@tastiekit.com',
-            support_phone: '+91 9876543210',
-            currency: 'INR',
-            timezone: 'Asia/Kolkata'
+            platform_name: "TastieKit",
+            support_email: "support@tastiekit.com",
+            support_phone: "+91 9876543210",
+            currency: "INR",
+            timezone: "Asia/Kolkata",
         });
     }
 };
@@ -679,11 +770,14 @@ export const updateGeneralSettings = async (req, res) => {
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
-            await query(`
+            await query(
+                `
                 INSERT INTO admin_settings (setting_key, setting_value) 
                 VALUES ('general_${key}', ?)
                 ON DUPLICATE KEY UPDATE setting_value = ?
-            `, [value, value]);
+            `,
+                [value, value]
+            );
         }
 
         res.json({ message: "General settings updated successfully" });
@@ -696,10 +790,13 @@ export const updateGeneralSettings = async (req, res) => {
 // Settings - Notifications
 export const getNotificationSettings = async (req, res) => {
     try {
-        const settings = await query('SELECT * FROM admin_settings WHERE setting_key LIKE "notification_%"');
+        const settings = await query(
+            'SELECT * FROM admin_settings WHERE setting_key LIKE "notification_%"'
+        );
         const result = {};
-        settings.forEach(s => {
-            result[s.setting_key.replace('notification_', '')] = s.setting_value === 'true';
+        settings.forEach((s) => {
+            result[s.setting_key.replace("notification_", "")] =
+                s.setting_value === "true";
         });
         res.json(result);
     } catch (error) {
@@ -710,7 +807,7 @@ export const getNotificationSettings = async (req, res) => {
             push_notifications: true,
             new_order_alert: true,
             new_application_alert: true,
-            low_stock_alert: false
+            low_stock_alert: false,
         });
     }
 };
@@ -720,28 +817,38 @@ export const updateNotificationSettings = async (req, res) => {
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
-            await query(`
+            await query(
+                `
                 INSERT INTO admin_settings (setting_key, setting_value) 
                 VALUES ('notification_${key}', ?)
                 ON DUPLICATE KEY UPDATE setting_value = ?
-            `, [value.toString(), value.toString()]);
+            `,
+                [value.toString(), value.toString()]
+            );
         }
 
         res.json({ message: "Notification settings updated successfully" });
     } catch (error) {
         console.error("Error updating notification settings:", error);
-        res.status(500).json({ error: "Failed to update notification settings" });
+        res.status(500).json({
+            error: "Failed to update notification settings",
+        });
     }
 };
 
 // Settings - Security
 export const getSecuritySettings = async (req, res) => {
     try {
-        const settings = await query('SELECT * FROM admin_settings WHERE setting_key LIKE "security_%"');
+        const settings = await query(
+            'SELECT * FROM admin_settings WHERE setting_key LIKE "security_%"'
+        );
         const result = {};
-        settings.forEach(s => {
-            const key = s.setting_key.replace('security_', '');
-            result[key] = key === 'two_factor_auth' ? s.setting_value === 'true' : parseInt(s.setting_value);
+        settings.forEach((s) => {
+            const key = s.setting_key.replace("security_", "");
+            result[key] =
+                key === "two_factor_auth"
+                    ? s.setting_value === "true"
+                    : parseInt(s.setting_value);
         });
         res.json(result);
     } catch (error) {
@@ -750,7 +857,7 @@ export const getSecuritySettings = async (req, res) => {
             two_factor_auth: false,
             session_timeout: 30,
             password_expiry_days: 90,
-            max_login_attempts: 5
+            max_login_attempts: 5,
         });
     }
 };
@@ -760,11 +867,14 @@ export const updateSecuritySettings = async (req, res) => {
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
-            await query(`
+            await query(
+                `
                 INSERT INTO admin_settings (setting_key, setting_value) 
                 VALUES ('security_${key}', ?)
                 ON DUPLICATE KEY UPDATE setting_value = ?
-            `, [value.toString(), value.toString()]);
+            `,
+                [value.toString(), value.toString()]
+            );
         }
 
         res.json({ message: "Security settings updated successfully" });
@@ -777,15 +887,17 @@ export const updateSecuritySettings = async (req, res) => {
 // Settings - Restaurant Commission
 export const getRestaurantCommission = async (req, res) => {
     try {
-        const settings = await query('SELECT * FROM admin_settings WHERE setting_key LIKE "commission_%"');
+        const settings = await query(
+            'SELECT * FROM admin_settings WHERE setting_key LIKE "commission_%"'
+        );
         const result = {
             percentage: 15,
             fixed_fee: 0,
             min_order_amount: 100,
-            max_commission: 500
+            max_commission: 500,
         };
-        settings.forEach(s => {
-            const key = s.setting_key.replace('commission_', '');
+        settings.forEach((s) => {
+            const key = s.setting_key.replace("commission_", "");
             result[key] = parseFloat(s.setting_value);
         });
         res.json(result);
@@ -795,7 +907,7 @@ export const getRestaurantCommission = async (req, res) => {
             percentage: 15,
             fixed_fee: 0,
             min_order_amount: 100,
-            max_commission: 500
+            max_commission: 500,
         });
     }
 };
@@ -805,11 +917,14 @@ export const updateRestaurantCommission = async (req, res) => {
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
-            await query(`
+            await query(
+                `
                 INSERT INTO admin_settings (setting_key, setting_value) 
                 VALUES ('commission_${key}', ?)
                 ON DUPLICATE KEY UPDATE setting_value = ?
-            `, [value.toString(), value.toString()]);
+            `,
+                [value.toString(), value.toString()]
+            );
         }
 
         res.json({ message: "Commission settings updated successfully" });
@@ -822,18 +937,23 @@ export const updateRestaurantCommission = async (req, res) => {
 // Settings - Delivery
 export const getDeliverySettings = async (req, res) => {
     try {
-        const settings = await query('SELECT * FROM admin_settings WHERE setting_key LIKE "delivery_%"');
+        const settings = await query(
+            'SELECT * FROM admin_settings WHERE setting_key LIKE "delivery_%"'
+        );
         const result = {
             base_delivery_fee: 30,
             per_km_rate: 10,
             min_delivery_fee: 25,
             max_delivery_fee: 100,
             peak_hour_multiplier: 1.5,
-            peak_hours: '12:00-14:00,19:00-22:00'
+            peak_hours: "12:00-14:00,19:00-22:00",
         };
-        settings.forEach(s => {
-            const key = s.setting_key.replace('delivery_', '');
-            result[key] = key === 'peak_hours' ? s.setting_value : parseFloat(s.setting_value);
+        settings.forEach((s) => {
+            const key = s.setting_key.replace("delivery_", "");
+            result[key] =
+                key === "peak_hours"
+                    ? s.setting_value
+                    : parseFloat(s.setting_value);
         });
         res.json(result);
     } catch (error) {
@@ -844,7 +964,7 @@ export const getDeliverySettings = async (req, res) => {
             min_delivery_fee: 25,
             max_delivery_fee: 100,
             peak_hour_multiplier: 1.5,
-            peak_hours: '12:00-14:00,19:00-22:00'
+            peak_hours: "12:00-14:00,19:00-22:00",
         });
     }
 };
@@ -854,11 +974,14 @@ export const updateDeliverySettings = async (req, res) => {
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
-            await query(`
+            await query(
+                `
                 INSERT INTO admin_settings (setting_key, setting_value) 
                 VALUES ('delivery_${key}', ?)
                 ON DUPLICATE KEY UPDATE setting_value = ?
-            `, [value.toString(), value.toString()]);
+            `,
+                [value.toString(), value.toString()]
+            );
         }
 
         res.json({ message: "Delivery settings updated successfully" });
@@ -895,5 +1018,5 @@ export default {
     getRestaurantCommission,
     updateRestaurantCommission,
     getDeliverySettings,
-    updateDeliverySettings
+    updateDeliverySettings,
 };
