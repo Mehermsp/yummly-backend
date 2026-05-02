@@ -83,6 +83,7 @@ export const markPhoneVerified = async (userId) =>
 
 export const createOtpVerification = async ({
     userId,
+    email,
     phone,
     otpCode,
     type,
@@ -90,18 +91,18 @@ export const createOtpVerification = async ({
 }) =>
     query(
         `
-        INSERT INTO otp_verifications (user_id, phone, otp, type, expires_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO otp_verifications (user_id, email, phone, otp, type, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         `,
-        [userId || null, phone, otpCode, type, expiresAt]
+        [userId || null, email || null, phone || null, otpCode, type, expiresAt]
     );
 
-export const consumeOtpVerification = async ({ phone, otpCode, type }) =>
+export const consumeOtpVerification = async ({ phone, email, otpCode, type }) =>
     getOne(
         `
         SELECT *
         FROM otp_verifications
-        WHERE phone = ?
+        WHERE (phone = ? OR email = ?)
           AND otp = ?
           AND type = ?
           AND is_used = 0
@@ -109,7 +110,7 @@ export const consumeOtpVerification = async ({ phone, otpCode, type }) =>
         ORDER BY id DESC
         LIMIT 1
         `,
-        [phone, otpCode, type]
+        [phone || null, email || null, otpCode, type]
     );
 
 export const markOtpUsed = async (otpId) =>
@@ -127,7 +128,7 @@ export const updateDeliveryAvailability = async (userId, isAvailable) =>
         `
         UPDATE users
         SET is_available = ?
-        WHERE id = ? AND role = 'delivery_partner'
+        WHERE id = ?
         `,
         [isAvailable ? 1 : 0, userId]
     );
@@ -138,4 +139,58 @@ export const listUsers = async (role) =>
             role ? "WHERE role = ?" : ""
         } ORDER BY created_at DESC`,
         role ? [role] : []
+    );
+
+export const updateUserProfile = async (userId, updates = {}) => {
+    const fields = [];
+    const values = [];
+
+    const assign = (column, value) => {
+        if (value === undefined) return;
+        fields.push(`${column} = ?`);
+        values.push(value);
+    };
+
+    assign("name", updates.name);
+    assign("phone", updates.phone);
+    assign("profile_image", updates.profile_image);
+    assign("profile_image_public_id", updates.profile_image_public_id);
+
+    if (!fields.length) return;
+
+    await query(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`, [
+        ...values,
+        userId,
+    ]);
+};
+
+export const updateUserPasswordById = async (userId, passwordHash) =>
+    query(`UPDATE users SET password = ? WHERE id = ?`, [passwordHash, userId]);
+
+export const savePasswordResetToken = async ({
+    userId,
+    email,
+    resetToken,
+    expiresAt,
+}) =>
+    query(
+        `
+        INSERT INTO password_resets (user_id, email, reset_token, expires_at, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+        `,
+        [userId, email, resetToken, expiresAt]
+    );
+
+export const consumePasswordResetToken = async ({ email, resetToken }) =>
+    getOne(
+        `
+        SELECT *
+        FROM password_resets
+        WHERE email = ?
+          AND reset_token = ?
+          AND expires_at > NOW()
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        [email, resetToken]
     );

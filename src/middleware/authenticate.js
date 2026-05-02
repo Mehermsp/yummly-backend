@@ -2,6 +2,24 @@ import { getUserById } from "../models/userModel.js";
 import { verifyAccessToken } from "../utils/jwt.js";
 import { AppError } from "../utils/http.js";
 
+const normalizeRole = (role) => {
+    const raw = String(role || "")
+        .trim()
+        .toLowerCase();
+
+    const aliases = {
+        delivery: "delivery_partner",
+        deliveryboy: "delivery_partner",
+        delivery_boy: "delivery_partner",
+        rider: "delivery_partner",
+        restaurant: "restaurant_partner",
+        vendor: "restaurant_partner",
+        user: "customer",
+    };
+
+    return aliases[raw] || raw;
+};
+
 export const authenticate = async (req, res, next) => {
     const header = req.headers.authorization;
 
@@ -24,7 +42,11 @@ export const authenticate = async (req, res, next) => {
             throw new AppError(401, "User account is not active");
         }
 
-        req.user = user;
+        req.user = {
+            ...user,
+            role_original: user.role,
+            role: normalizeRole(user.role),
+        };
         req.auth = payload;
         return next();
     } catch (error) {

@@ -5,7 +5,9 @@ import {
     deletePartnerMenuItem,
     getPartnerDashboard,
     getPartnerMenu,
+    getPartnerProfile,
     submitApplication,
+    updatePartnerProfile,
     updatePartnerMenuItem,
 } from "../controllers/restaurantController.js";
 import { authenticate } from "../middleware/authenticate.js";
@@ -15,6 +17,8 @@ const router = Router();
 
 router.use(authenticate, authorize(ROLES.RESTAURANT_PARTNER));
 router.get("/dashboard", getPartnerDashboard);
+router.get("/profile", getPartnerProfile);
+router.put("/profile", updatePartnerProfile);
 router.post("/applications", submitApplication);
 router.get("/menu", getPartnerMenu);
 router.post("/menu", createPartnerMenuItem);
