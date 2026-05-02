@@ -29,6 +29,11 @@ router.patch(
     authorize(ROLES.RESTAURANT_PARTNER),
     updateRestaurantOrderStatus
 );
+router.put(
+    "/restaurant/:orderId/status",
+    authorize(ROLES.RESTAURANT_PARTNER),
+    updateRestaurantOrderStatus
+);
 router.get(
     "/:orderId",
     authorize(

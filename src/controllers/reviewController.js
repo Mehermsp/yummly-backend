@@ -5,7 +5,7 @@ import { createReview, getReviewByOrderId } from "../models/reviewModel.js";
 
 export const submitReview = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.body.orderId);
-    if (!order || order.customer_id !== req.user.id) {
+    if (!order || Number(order.customer_id) !== Number(req.user.id)) {
         throw new AppError(404, "Delivered order not found");
     }
 

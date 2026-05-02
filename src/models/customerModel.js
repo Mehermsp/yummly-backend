@@ -178,7 +178,7 @@ export const removeWishlistRestaurant = async (userId, wishlistOrMenuItemId) =>
         `
         DELETE FROM wishlists
         WHERE user_id = ?
-          AND (id = ? OR menu_item_id = ?)
+          AND (id = ? OR menu_id = ?)
         `,
         [userId, wishlistOrMenuItemId, wishlistOrMenuItemId]
     );

@@ -67,9 +67,9 @@ export const getApplications = async (req, res) => {
                 cuisines as cuisine_type,
                 open_time as opening_time,
                 close_time as closing_time,
-                fssai as license_number,
-                gst as gst_number,
-                pan,
+fssai_number as license_number,
+                gst_number as gst_number,
+                pan_number as pan_number,
                 status,
                 review_notes as rejection_reason,
                 created_at,
@@ -111,9 +111,9 @@ export const getApplicationById = async (req, res) => {
                 open_time as opening_time,
                 close_time as closing_time,
                 days_open,
-                fssai as license_number,
-                gst as gst_number,
-                pan,
+fssai_number as license_number,
+                gst_number as gst_number,
+                pan_number as pan_number,
                 logo,
                 status,
                 review_notes as rejection_reason,
@@ -169,8 +169,8 @@ export const approveApplication = async (req, res) => {
                 INSERT INTO restaurants (
                     user_id, owner_id, name, email, phone, 
                     description, address, city, state, pincode, landmark,
-                    cuisines, open_time, close_time, days_open,
-                    fssai, gst, pan, logo, is_active, is_approved, status
+cuisines, open_time, close_time, days_open,
+                    fssai_number, gst_number, pan_number, logo, is_active, is_approved, status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'approved')
             `,
                 [
@@ -189,9 +189,9 @@ export const approveApplication = async (req, res) => {
                     app.open_time,
                     app.close_time,
                     app.days_open || "[]",
-                    app.fssai,
-                    app.gst,
-                    app.pan,
+                    app.fssai_number,
+                    app.gst_number,
+                    app.pan_number,
                     app.logo || "",
                 ]
             );
@@ -253,9 +253,9 @@ export const getRestaurants = async (req, res) => {
                 r.open_time as opening_time,
                 r.close_time as closing_time,
                 r.days_open,
-                r.fssai as license_number,
-                r.gst as gst_number,
-                r.pan,
+r.fssai_number as license_number,
+                r.gst_number as gst_number,
+                r.pan_number as pan_number,
                 r.rating,
                 r.is_open,
                 r.is_active,
@@ -270,7 +270,7 @@ export const getRestaurants = async (req, res) => {
             FROM restaurants r
             LEFT JOIN users u ON r.user_id = u.id
             ORDER BY r.created_at DESC
-        `);
+`);
 
         // Map is_active to status for consistency
         const result = restaurants.map((r) => ({
@@ -311,9 +311,9 @@ export const getRestaurantById = async (req, res) => {
                 r.open_time as opening_time,
                 r.close_time as closing_time,
                 r.days_open,
-                r.fssai as license_number,
-                r.gst as gst_number,
-                r.pan,
+r.fssai_number as license_number,
+                r.gst_number as gst_number,
+                r.pan_number as pan_number,
                 r.rating,
                 r.is_open,
                 r.is_active,
@@ -582,6 +582,11 @@ export const assignDeliveryPartner = async (req, res) => {
                 error: "Cannot assign delivery for delivered or cancelled orders",
             });
         }
+        if (order.status !== "ready_for_pickup") {
+            return res.status(400).json({
+                error: "Delivery assignment is allowed only when order is ready_for_pickup",
+            });
+        }
 
         const partnerRows = await query(
             `
@@ -593,7 +598,9 @@ export const assignDeliveryPartner = async (req, res) => {
         );
 
         if (!partnerRows.length) {
-            return res.status(404).json({ error: "Delivery partner not found" });
+            return res
+                .status(404)
+                .json({ error: "Delivery partner not found" });
         }
 
         if (!partnerRows[0].is_available) {
@@ -638,7 +645,8 @@ export const assignDeliveryPartner = async (req, res) => {
 
             if (
                 order.delivery_partner_id &&
-                Number(order.delivery_partner_id) !== Number(delivery_partner_id)
+                Number(order.delivery_partner_id) !==
+                    Number(delivery_partner_id)
             ) {
                 const [oldPendingRows] = await connection.execute(
                     `
@@ -787,7 +795,9 @@ export const updateDeliveryPartnerStatus = async (req, res) => {
 
         if (!allowedStatuses.includes(status)) {
             return res.status(400).json({
-                error: `Invalid status. Allowed values: ${allowedStatuses.join(", ")}`,
+                error: `Invalid status. Allowed values: ${allowedStatuses.join(
+                    ", "
+                )}`,
             });
         }
 
@@ -1120,18 +1130,40 @@ export const getReadyForPickupOrders = async (req, res) => {
                 o.user_id,
                 o.restaurant_id,
                 o.total,
+                o.total as total_amount,
                 o.status,
                 o.created_at,
                 cu.name as customer_name,
                 cu.phone as customer_phone,
-                r.name as restaurant_name
+                r.name as restaurant_name,
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                o.state,
+                o.zip_code as pincode
             FROM orders o
             LEFT JOIN users cu ON o.user_id = cu.id
             LEFT JOIN restaurants r ON o.restaurant_id = r.id
             WHERE o.status = 'ready_for_pickup'
             ORDER BY o.created_at DESC
         `);
-        res.json(orders);
+
+        const enrichedOrders = orders.map((o) => ({
+            ...o,
+            delivery_address: [
+                o.door_no,
+                o.street,
+                o.area,
+                o.city,
+                o.state,
+                o.pincode,
+            ]
+                .filter(Boolean)
+                .join(", "),
+        }));
+
+        res.json(enrichedOrders);
     } catch (error) {
         console.error("Error fetching ready for pickup orders:", error);
         res.status(500).json({

@@ -16,6 +16,20 @@ import {
     listRestaurantOrders,
 } from "../models/restaurantModel.js";
 
+const normalizeOrderStatusInput = (value) => {
+    const normalized = String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "_");
+
+    const aliases = {
+        ready_to_pickup: ORDER_STATUS.READY_FOR_PICKUP,
+        ready: ORDER_STATUS.READY_FOR_PICKUP,
+    };
+
+    return aliases[normalized] || normalized;
+};
+
 const validateRestaurantStatusTransition = (currentStatus, nextStatus) => {
     const allowedTransitions = {
         placed: [ORDER_STATUS.CONFIRMED, ORDER_STATUS.CANCELLED],
@@ -66,8 +80,8 @@ export const getOrderDetails = asyncHandler(async (req, res) => {
     }
 
     const canAccess =
-        order.customer_id === req.user.id ||
-        order.delivery_partner_id === req.user.id ||
+        Number(order.customer_id) === Number(req.user.id) ||
+        Number(order.delivery_partner_id) === Number(req.user.id) ||
         req.user.role === ROLES.ADMIN;
 
     if (req.user.role === ROLES.RESTAURANT_PARTNER) {
@@ -98,7 +112,7 @@ export const getOrderDetails = asyncHandler(async (req, res) => {
 
 export const getOrderTracking = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.params.orderId);
-    if (!order || order.customer_id !== req.user.id) {
+    if (!order || Number(order.customer_id) !== Number(req.user.id)) {
         throw new AppError(404, "Order not found");
     }
 
@@ -119,7 +133,7 @@ export const getOrderTracking = asyncHandler(async (req, res) => {
 
 export const cancelOrder = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.params.orderId);
-    if (!order || order.customer_id !== req.user.id) {
+    if (!order || Number(order.customer_id) !== Number(req.user.id)) {
         throw new AppError(404, "Order not found");
     }
 
@@ -159,14 +173,21 @@ export const updateRestaurantOrderStatus = asyncHandler(async (req, res) => {
         throw new AppError(404, "Order not found");
     }
 
-    const { status, notes } = req.body;
-    if (!validateRestaurantStatusTransition(order.status, status)) {
+    const { notes } = req.body;
+    const status = normalizeOrderStatusInput(req.body?.status);
+
+    if (!status) {
+        throw new AppError(400, "Status is required");
+    }
+
+    const currentStatus = normalizeOrderStatusInput(order.status);
+    if (!validateRestaurantStatusTransition(currentStatus, status)) {
         throw new AppError(400, "Invalid status transition for restaurant");
     }
 
     await updateOrderStatus({
         orderId: order.id,
-        currentStatus: order.status,
+        currentStatus,
         nextStatus: status,
         actorId: req.user.id,
         actorRole: "restaurant_partner",

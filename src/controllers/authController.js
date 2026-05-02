@@ -4,6 +4,7 @@ import {
     comparePassword,
     createOtpVerification,
     createUser,
+    findUserByEmailOrPhone,
     findUserForAuth,
     getUserById,
     hashPassword,
@@ -37,13 +38,14 @@ export const register = asyncHandler(async (req, res) => {
         email,
         phone,
         password,
-        vehicleType,
-        vehicleNumber,
         adminBootstrapSecret,
     } = req.body;
 
-    if (!role || !name || !email || !phone) {
-        throw new AppError(400, "role, name, email and phone are required");
+    if (!role || !name || !email || !phone || !password) {
+        throw new AppError(
+            400,
+            "role, name, email, phone and password are required"
+        );
     }
 
     if (!Object.values(ROLES).includes(role)) {
@@ -58,7 +60,7 @@ export const register = asyncHandler(async (req, res) => {
         throw new AppError(403, "Admin bootstrap secret is invalid");
     }
 
-    const existing = await findUserForAuth(phone);
+    const existing = await findUserByEmailOrPhone({ email, phone });
     if (existing) {
         throw new AppError(409, "User already exists with this phone or email");
     }
@@ -70,8 +72,6 @@ export const register = asyncHandler(async (req, res) => {
         email,
         phone,
         passwordHash,
-        vehicleType,
-        vehicleNumber,
     });
 
     const otpCode = generateOtp();
@@ -112,10 +112,10 @@ export const login = asyncHandler(async (req, res) => {
         throw new AppError(404, "User not found");
     }
 
-    if (user.password_hash) {
+    if (user.password) {
         const validPassword = await comparePassword(
             password,
-            user.password_hash
+            user.password
         );
         if (!validPassword) {
             throw new AppError(401, "Invalid credentials");

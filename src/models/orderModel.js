@@ -641,13 +641,8 @@ const orderSelect = `
 `;
 
 const statusTimestampFragments = {
-    confirmed: "confirmed_at = CURRENT_TIMESTAMP",
-    preparing: "prepared_at = CURRENT_TIMESTAMP",
-    ready_for_pickup: "prepared_at = CURRENT_TIMESTAMP",
-    out_for_delivery: "picked_up_at = CURRENT_TIMESTAMP",
     delivered:
         "delivered_at = CURRENT_TIMESTAMP, actual_delivery_time = CURRENT_TIMESTAMP",
-    cancelled: "cancelled_at = CURRENT_TIMESTAMP",
 };
 
 const summarizeCart = (cartItems) => {
@@ -931,31 +926,20 @@ export const updateOrderStatus = async ({
         await query(sqlPrimary, primaryParams);
     } catch {
         // Legacy schemas may miss delivery_notes or timestamp columns.
-        await query(sqlFallback, fallbackParams);
-    }
-    // Support both legacy and newer order_status_logs schemas.
-    try {
-        await query(
-            `INSERT INTO order_status_logs (order_id, old_status, new_status, changed_by, changed_by_role, notes) VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-                orderId,
-                currentStatus || null,
-                nextStatus,
-                actorId || null,
-                actorRole || "system",
-                notes || null,
-            ]
-        );
-    } catch {
         try {
-            await query(
-                `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-                [orderId, nextStatus]
-            );
+            await query(sqlFallback, fallbackParams);
         } catch {
-            // Keep status update successful even if log schema differs.
+            // Last fallback for very old schemas that may not have updated_at.
+            await query(`UPDATE orders SET status = ? WHERE id = ?`, [
+                nextStatus,
+                orderId,
+            ]);
         }
     }
+    await query(
+        `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [orderId, nextStatus]
+    );
 };
 
 export const cancelOrder = async ({
@@ -1023,8 +1007,8 @@ export const updateAssignmentStatus = async ({
         SET status = ?, rejection_reason = ?,
             accepted_at = CASE WHEN ? = 'accepted' THEN CURRENT_TIMESTAMP ELSE accepted_at END,
             rejected_at = CASE WHEN ? = 'rejected' THEN CURRENT_TIMESTAMP ELSE rejected_at END,
-            picked_up_at = CASE WHEN ? = 'picked_up' THEN CURRENT_TIMESTAMP ELSE picked_up_at END,
-            delivered_at = CASE WHEN ? = 'delivered' THEN CURRENT_TIMESTAMP ELSE delivered_at END
+            pickup_time = CASE WHEN ? = 'picked_up' THEN CURRENT_TIMESTAMP ELSE pickup_time END,
+            delivery_time = CASE WHEN ? = 'delivered' THEN CURRENT_TIMESTAMP ELSE delivery_time END
         WHERE order_id = ? AND delivery_partner_id = ?
         `,
         [
@@ -1037,6 +1021,31 @@ export const updateAssignmentStatus = async ({
             orderId,
             deliveryPartnerId,
         ]
+    );
+
+export const getAssignmentForOrderAndPartner = async (
+    orderId,
+    deliveryPartnerId
+) =>
+    getOne(
+        `
+        SELECT *
+        FROM delivery_assignments
+        WHERE order_id = ? AND delivery_partner_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        [orderId, deliveryPartnerId]
+    );
+
+export const clearOrderDeliveryPartner = async (orderId, deliveryPartnerId) =>
+    query(
+        `
+        UPDATE orders
+        SET delivery_partner_id = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND delivery_partner_id = ?
+        `,
+        [orderId, deliveryPartnerId]
     );
 
 export const listRestaurantOrders = async (restaurantId, status) =>
@@ -1088,11 +1097,14 @@ export const adminAssignOrder = async ({
             [deliveryPartnerId, orderId]
         );
         await connection.execute(
-            `INSERT INTO admin_activity_logs (admin_id, action, entity_type, entity_id, description) VALUES (?, 'assign_order', 'order', ?, ?)`,
+            `INSERT INTO admin_activity_log (admin_id, action, entity_type, entity_id, details) VALUES (?, 'assign_order', 'order', ?, ?)`,
             [
                 adminId,
                 orderId,
-                `Assigned order ${orderId} to delivery partner ${deliveryPartnerId}`,
+                JSON.stringify({
+                    message: `Assigned order ${orderId} to delivery partner ${deliveryPartnerId}`,
+                    delivery_partner_id: deliveryPartnerId,
+                }),
             ]
         );
     });
@@ -1102,12 +1114,12 @@ export const getDeliveryPartnerStats = async (deliveryPartnerId) => {
     const rows = await query(
         `
         SELECT COUNT(*) AS total_deliveries,
-               COUNT(CASE WHEN DATE(da.delivered_at) = ? THEN 1 END) AS today_deliveries,
-               COALESCE(SUM(CASE WHEN DATE(da.delivered_at) = ? THEN o.delivery_fee ELSE 0 END), 0) AS today_earnings,
-               COALESCE(AVG(u.delivery_rating), 0) AS avg_rating
+               COUNT(CASE WHEN DATE(da.delivery_time) = ? THEN 1 END) AS today_deliveries,
+               COALESCE(SUM(CASE WHEN DATE(da.delivery_time) = ? THEN o.delivery_fee ELSE 0 END), 0) AS today_earnings,
+               COALESCE(AVG(rv.delivery_rating), 0) AS avg_rating
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
-        INNER JOIN users u ON u.id = da.delivery_partner_id
+        LEFT JOIN reviews rv ON rv.order_id = da.order_id
         WHERE da.delivery_partner_id = ? AND da.status = 'delivered'
         `,
         [today, today, deliveryPartnerId]
