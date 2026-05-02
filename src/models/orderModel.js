@@ -973,12 +973,15 @@ export const getDeliveryOpenOrders = async () =>
     query(
         `
         SELECT o.id, o.order_number, o.status, o.total, o.delivery_fee, o.created_at,
-               r.name AS restaurant_name, r.address AS restaurant_address,
-               o.door_no, o.street, o.area, o.city, o.state, o.zip_code
+               r.name AS restaurant_name, r.address AS restaurant_address, r.cover_image AS restaurant_image,
+               r.phone AS restaurant_phone,
+               o.door_no, o.street, o.area, o.city, o.state, o.zip_code,
+               c.name AS customer_name, c.phone AS customer_phone
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
+        LEFT JOIN users c ON c.id = o.user_id
         LEFT JOIN delivery_assignments da ON da.order_id = o.id AND da.status IN ('assigned', 'accepted', 'picked_up')
-        WHERE o.status = 'ready_for_pickup' AND da.id IS NULL
+        WHERE o.status IN ('ready', 'ready_for_pickup', 'prepared') AND da.id IS NULL
         ORDER BY o.created_at ASC
         `
     );
@@ -1074,11 +1077,46 @@ export const listRestaurantOrders = async (restaurantId, status) =>
 export const listDeliveryAssignments = async (deliveryPartnerId) =>
     query(
         `
-        SELECT da.order_id, da.status AS assignment_status, da.assigned_at, o.order_number, o.status AS order_status,
-               o.total, o.delivery_fee, o.created_at, r.name AS restaurant_name, o.door_no, o.street, o.area, o.city, o.zip_code
+        SELECT 
+            da.order_id, 
+            da.status AS assignment_status, 
+            da.assigned_at,
+            da.accepted_at,
+            da.picked_up_at,
+            da.delivered_at,
+            o.order_number, 
+            o.status AS order_status,
+            o.subtotal,
+            o.discount_amount,
+            o.delivery_fee,
+            o.tax_amount,
+            o.total, 
+            o.payment_method,
+            o.payment_status,
+            o.created_at,
+            o.notes AS customer_notes,
+            -- Restaurant details
+            r.name AS restaurant_name,
+            r.address AS restaurant_address,
+            r.cover_image AS restaurant_image,
+            r.phone AS restaurant_phone,
+            r.email AS restaurant_email,
+            -- Customer details
+            c.name AS customer_name,
+            c.phone AS customer_phone,
+            c.email AS customer_email,
+            -- Delivery address
+            o.door_no,
+            o.street,
+            o.area,
+            o.city,
+            o.state,
+            o.zip_code,
+            o.phone AS delivery_phone
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id
+        INNER JOIN users c ON c.id = o.user_id
         WHERE da.delivery_partner_id = ?
         ORDER BY da.assigned_at DESC
         `,

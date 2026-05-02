@@ -93,17 +93,38 @@ export const getDeliveryIncome = asyncHandler(async (req, res) => {
 });
 
 export const setDeliveryAvailability = asyncHandler(async (req, res) => {
-    await updateDeliveryAvailability(
-        req.user.id,
-        Boolean(req.body.isAvailable)
-    );
+    const isAvailable = Boolean(req.body.isAvailable);
+
+    // If trying to go offline, check for active/pending orders
+    if (!isAvailable) {
+        const assignments = await listDeliveryAssignments(req.user.id);
+
+        // Check for orders that are not delivered or rejected
+        const activeOrders = assignments.filter(
+            (a) =>
+                !["delivered", "rejected", "cancelled"].includes(
+                    a.assignment_status
+                )
+        );
+
+        if (activeOrders.length > 0) {
+            throw new AppError(
+                400,
+                `Cannot go offline: You have ${activeOrders.length} active/pending order(s). Complete or hand over these orders first.`
+            );
+        }
+    }
+
+    await updateDeliveryAvailability(req.user.id, isAvailable);
     sendSuccess(
         res,
         {
             ...req.user,
-            is_available: Boolean(req.body.isAvailable),
+            is_available: isAvailable,
         },
-        "Availability updated successfully"
+        isAvailable
+            ? "You are now online and ready for deliveries"
+            : "You are now offline"
     );
 });
 
@@ -262,12 +283,18 @@ export const completeDeliveryOrder = asyncHandler(async (req, res) => {
     if (order.status === ORDER_STATUS.DELIVERED) {
         return sendSuccess(res, null, "Order already delivered");
     }
-    // Accept both on_the_way and legacy out_for_delivery
-    const inDeliveryStatuses = [ORDER_STATUS.ON_THE_WAY, "out_for_delivery"];
+    // Accept both on_the_way, out_for_delivery, picked_up (once picked up, can mark delivered)
+    const inDeliveryStatuses = [
+        ORDER_STATUS.ON_THE_WAY,
+        ORDER_STATUS.PICKED_UP,
+        "out_for_delivery",
+        "picked_up",
+    ];
     if (!inDeliveryStatuses.includes(order.status)) {
         throw new AppError(
             400,
-            "Order must be on the way before marking delivered"
+            "Order must be picked up before marking delivered. Current status: " +
+                order.status
         );
     }
 
