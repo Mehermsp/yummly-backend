@@ -22,7 +22,7 @@ const requiredEnv = [
     "JWT_ACCESS_SECRET",
     "DB_HOST",
     "DB_USER",
-    "DB_PASS",
+    "DB_PASSWORD",
     "DB_NAME",
 ];
 
@@ -34,10 +34,11 @@ requiredEnv.forEach((key) => {
 });
 
 export const env = {
+    // Node Environment
     nodeEnv: process.env.NODE_ENV || "development",
     port: Number(process.env.PORT) || 5000,
 
-    // JWT - Critical Fix
+    // JWT
     jwtAccessSecret: String(process.env.JWT_ACCESS_SECRET || "").trim(),
     jwtAccessTtl: process.env.JWT_ACCESS_TTL || "7d",
 
@@ -47,7 +48,7 @@ export const env = {
     dbHost: process.env.DB_HOST,
     dbPort: Number(process.env.DB_PORT || 3306),
     dbUser: process.env.DB_USER,
-    dbPassword: (process.env.DB_PASS || process.env.DB_PASSWORD || "").trim(),
+    dbPassword: (process.env.DB_PASSWORD || process.env.DB_PASS || "").trim(),
     dbName: process.env.DB_NAME,
 
     dbPoolLimit: Number(
@@ -61,6 +62,41 @@ export const env = {
     allowedOrigins: splitCsv(process.env.CORS_ORIGINS),
 
     adminBootstrapSecret: process.env.ADMIN_BOOTSTRAP_SECRET || "",
+
+    // Cloudinary
+    cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",
+    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
+    cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
+
+    // Email (Brevo/SMTP)
+    brevoApiKey:
+        process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY || "",
+    emailFrom:
+        process.env.EMAIL_FROM ||
+        process.env.SMTP_FROM ||
+        process.env.MAIL_FROM ||
+        "",
+    emailFromName: process.env.EMAIL_FROM_NAME || "TastieKit",
+
+    // SMTP (alternative naming)
+    smtpHost: process.env.SMTP_HOST || process.env.MAIL_HOST || "",
+    smtpPort: Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587),
+    smtpUser:
+        process.env.EMAIL_USER ||
+        process.env.SMTP_USER ||
+        process.env.MAIL_USER ||
+        "",
+    smtpPass:
+        process.env.EMAIL_PASS ||
+        process.env.SMTP_PASS ||
+        process.env.MAIL_PASS ||
+        "",
+    smtpFrom:
+        process.env.SMTP_FROM ||
+        process.env.EMAIL_FROM ||
+        process.env.MAIL_FROM ||
+        "",
+    smtpSecure: parseBoolean(process.env.SMTP_SECURE, false),
 };
 
 // Final safety check for JWT Secret

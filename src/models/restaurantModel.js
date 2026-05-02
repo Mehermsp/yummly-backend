@@ -217,11 +217,50 @@ export const getRestaurantByOwnerId = async (ownerId) =>
             r.cover_image,
             COALESCE(r.cover_image, r.logo) AS image_url
         FROM restaurants r
-        WHERE r.owner_id = ?
+        WHERE r.owner_id = ? OR r.user_id = ?
         LIMIT 1
         `,
-        [ownerId]
+        [ownerId, ownerId]
     );
+
+export const updateRestaurantProfileByOwnerId = async (ownerId, payload = {}) => {
+    const fields = [];
+    const values = [];
+
+    const assign = (column, value) => {
+        if (value === undefined) return;
+        fields.push(`${column} = ?`);
+        values.push(value);
+    };
+
+    assign("name", payload.name);
+    assign("description", payload.description);
+    assign("city", payload.city);
+    assign("area", payload.area);
+    assign("address", payload.address);
+    assign("pincode", payload.pincode);
+    assign("landmark", payload.landmark);
+    assign("open_time", payload.open_time);
+    assign("close_time", payload.close_time);
+    assign("logo", payload.logo);
+    assign("cover_image", payload.cover_image);
+
+    if (payload.cuisines !== undefined) {
+        assign("cuisines", JSON.stringify(payload.cuisines || []));
+    }
+    if (payload.days_open !== undefined) {
+        assign("days_open", JSON.stringify(payload.days_open || []));
+    }
+
+    if (!fields.length) return;
+
+    assign("updated_at", new Date());
+
+    await query(
+        `UPDATE restaurants SET ${fields.join(", ")} WHERE owner_id = ? OR user_id = ?`,
+        [...values, ownerId, ownerId]
+    );
+};
 
 export const createMenuItem = async (restaurantId, payload) => {
     const result = await query(
@@ -348,63 +387,37 @@ export const getRestaurantDashboard = async (restaurantId) => {
 };
 
 export const listRestaurantOrders = async (restaurantId, status) => {
-    try {
-        return await query(
-            `
-            SELECT
-                o.id,
-                o.order_number,
-                o.status,
-                o.total,
-                o.payment_status,
-                o.created_at,
-                o.customer_notes,
-                c.name AS customer_name,
-                c.phone AS customer_phone,
-                a.door_no,
-                a.street,
-                a.area,
-                a.city,
-                a.state,
-                a.pincode
-            FROM orders o
-            INNER JOIN users c ON c.id = o.customer_id
-            LEFT JOIN addresses a ON a.id = o.delivery_address_id
-            WHERE o.restaurant_id = ?
-              AND (? IS NULL OR o.status = ?)
-            ORDER BY o.created_at DESC
-            `,
-            [restaurantId, status || null, status || null]
-        );
-    } catch {
-        // Backward compatibility for older deployed schemas.
-        return query(
-            `
-            SELECT
-                o.id,
-                o.order_number,
-                o.status,
-                o.total,
-                o.payment_status,
-                o.created_at,
-                o.notes AS customer_notes,
-                c.name AS customer_name,
-                c.phone AS customer_phone,
-                o.door_no,
-                o.street,
-                o.area,
-                o.city,
-                NULL AS state,
-                o.zip_code AS pincode
-            FROM orders o
-            INNER JOIN users c ON c.id = o.user_id
-            WHERE o.restaurant_id = ?
-              AND (? IS NULL OR o.status = ?)
-            ORDER BY o.created_at DESC
-            `,
-            [restaurantId, status || null, status || null]
-        );
-    }
+    return query(
+        `
+        SELECT
+            o.id,
+            o.order_number,
+            o.status,
+            o.total,
+            o.payment_status,
+            o.created_at,
+            o.notes AS customer_notes,
+            c.name AS customer_name,
+            c.phone AS customer_phone,
+            o.door_no,
+            o.street,
+            o.area,
+            o.city,
+            o.state,
+            o.zip_code AS pincode,
+            (
+                SELECT COALESCE(SUM(oi.qty), 0)
+                FROM order_items oi
+                WHERE oi.order_id = o.id
+            ) AS item_count
+        FROM orders o
+        INNER JOIN users c ON c.id = o.user_id
+        WHERE o.restaurant_id = ?
+          AND (? IS NULL OR o.status = ?)
+        ORDER BY o.created_at DESC
+        `,
+        [restaurantId, status || null, status || null]
+    );
 };
 
 export const listApplications = async (status) =>

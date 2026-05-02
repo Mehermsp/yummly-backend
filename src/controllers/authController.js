@@ -1,7 +1,9 @@
 import { env } from "../config/env.js";
+import crypto from "crypto";
 import { ROLES } from "../constants/index.js";
 import {
     comparePassword,
+    consumePasswordResetToken,
     createOtpVerification,
     createUser,
     findUserByEmailOrPhone,
@@ -11,6 +13,9 @@ import {
     markPhoneVerified,
     markOtpUsed,
     consumeOtpVerification,
+    savePasswordResetToken,
+    updateUserPasswordById,
+    updateUserProfile,
 } from "../models/userModel.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { signAccessToken } from "../utils/jwt.js";
@@ -77,6 +82,7 @@ export const register = asyncHandler(async (req, res) => {
     const otpCode = generateOtp();
     await createOtpVerification({
         userId,
+        email,
         phone,
         otpCode,
         type: "register",
@@ -129,20 +135,57 @@ export const login = asyncHandler(async (req, res) => {
 });
 
 export const verifyOtp = asyncHandler(async (req, res) => {
-    const { phone, otpCode, type } = req.body;
+    const { phone, email, otpCode, otp, type = "login" } = req.body;
+    const otpValue = otpCode || otp;
+    const channel = phone ? "phone" : "email";
+    const identifier = phone || email;
 
-    if (!phone || !otpCode || !type) {
-        throw new AppError(400, "phone, otpCode and type are required");
+    if (!identifier || !otpValue || !type) {
+        throw new AppError(
+            400,
+            "phone/email, otp (or otpCode) and type are required"
+        );
     }
 
-    const otp = await consumeOtpVerification({ phone, otpCode, type });
-    if (!otp) {
+    const otpRow = await consumeOtpVerification({
+        phone: channel === "phone" ? phone : null,
+        email: channel === "email" ? email : null,
+        otpCode: otpValue,
+        type,
+    });
+    if (!otpRow) {
         throw new AppError(400, "OTP is invalid or expired");
     }
 
-    await markOtpUsed(otp.id);
-    await markPhoneVerified(otp.user_id);
-    const user = await getUserById(otp.user_id);
+    await markOtpUsed(otpRow.id);
+
+    if (type === "password_reset") {
+        const resetToken = crypto.randomBytes(24).toString("hex");
+        const resetExpires = new Date(Date.now() + env.otpTtlMinutes * 60 * 1000);
+
+        const user = await getUserById(otpRow.user_id);
+        if (!user) {
+            throw new AppError(404, "User not found");
+        }
+
+        await savePasswordResetToken({
+            userId: user.id,
+            email: user.email,
+            resetToken,
+            expiresAt: resetExpires,
+        });
+
+        return sendSuccess(
+            res,
+            { resetToken, expiresAt: resetExpires, email: user.email },
+            "OTP verified successfully"
+        );
+    }
+
+    if (otpRow.user_id) {
+        await markPhoneVerified(otpRow.user_id);
+    }
+    const user = await getUserById(otpRow.user_id);
     const session = await issueTokens(user);
 
     sendSuccess(res, session, "OTP verified successfully");
@@ -162,12 +205,13 @@ export const getMe = asyncHandler(async (req, res) => {
 });
 
 export const requestOtp = asyncHandler(async (req, res) => {
-    const { phone, type = "login" } = req.body;
-    if (!phone) {
-        throw new AppError(400, "phone is required");
+    const { phone, email, type = "login" } = req.body;
+    const identifier = phone || email;
+    if (!identifier) {
+        throw new AppError(400, "phone or email is required");
     }
 
-    const user = await findUserForAuth(phone);
+    const user = await findUserForAuth(identifier);
     if (!user) {
         throw new AppError(404, "User not found");
     }
@@ -175,7 +219,8 @@ export const requestOtp = asyncHandler(async (req, res) => {
     const otpCode = generateOtp();
     await createOtpVerification({
         userId: user.id,
-        phone,
+        email: user.email || null,
+        phone: phone || user.phone || null,
         otpCode,
         type,
         expiresAt: buildOtpExpiry(),
@@ -184,10 +229,71 @@ export const requestOtp = asyncHandler(async (req, res) => {
     sendSuccess(
         res,
         {
-            phone,
+            phone: user.phone || null,
+            email: user.email || null,
             otpExpiresInMinutes: env.otpTtlMinutes,
             devOtp: exposeDevOtp(otpCode),
         },
         "OTP sent successfully"
     );
+});
+
+export const requestPasswordReset = asyncHandler(async (req, res) => {
+    const { email, phone } = req.body;
+    const identifier = email || phone;
+    if (!identifier) {
+        throw new AppError(400, "email or phone is required");
+    }
+
+    const user = await findUserForAuth(identifier);
+    if (!user) {
+        throw new AppError(404, "User not found");
+    }
+
+    const otpCode = generateOtp();
+    await createOtpVerification({
+        userId: user.id,
+        email: user.email || null,
+        phone: user.phone || null,
+        otpCode,
+        type: "password_reset",
+        expiresAt: buildOtpExpiry(),
+    });
+
+    sendSuccess(
+        res,
+        {
+            email: user.email,
+            phone: user.phone,
+            otpExpiresInMinutes: env.otpTtlMinutes,
+            devOtp: exposeDevOtp(otpCode),
+        },
+        "Password reset OTP sent successfully"
+    );
+});
+
+export const resetPassword = asyncHandler(async (req, res) => {
+    const { email, resetToken, newPassword } = req.body;
+    if (!email || !resetToken || !newPassword) {
+        throw new AppError(400, "email, resetToken and newPassword are required");
+    }
+    if (String(newPassword).length < 6) {
+        throw new AppError(400, "Password must be at least 6 characters");
+    }
+
+    const tokenRow = await consumePasswordResetToken({ email, resetToken });
+    if (!tokenRow) {
+        throw new AppError(400, "Reset token is invalid or expired");
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    await updateUserPasswordById(tokenRow.user_id, passwordHash);
+
+    sendSuccess(res, null, "Password reset successful");
+});
+
+export const updateMe = asyncHandler(async (req, res) => {
+    await updateUserProfile(req.user.id, req.body || {});
+    const user = await getUserById(req.user.id);
+    sendSuccess(res, user, "User profile updated successfully");
 });

@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
+import { env } from "../config/env.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const JWT_SECRET = env.jwtAccessSecret;
 
 // Authenticate user
 export const authenticate = (req, res, next) => {
@@ -8,7 +9,9 @@ export const authenticate = (req, res, next) => {
         const token = req.headers.authorization?.split(" ")[1];
 
         if (!token) {
-            return res.status(401).json({ error: "Access denied. No token provided." });
+            return res
+                .status(401)
+                .json({ error: "Access denied. No token provided." });
         }
 
         const decoded = jwt.verify(token, JWT_SECRET);

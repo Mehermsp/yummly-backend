@@ -1,5 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError, sendSuccess } from "../utils/http.js";
+import { sendEmail } from "../utils/email.js";
 import {
     createOrder,
     getOrderById,
@@ -20,10 +21,14 @@ const normalizeOrderStatusInput = (value) => {
     const normalized = String(value || "")
         .trim()
         .toLowerCase()
-        .replace(/\s+/g, "_");
+        .replace(/[-\s]+/g, "_")
+        .replace(/_+/g, "_");
 
     const aliases = {
+        accepted: ORDER_STATUS.CONFIRMED,
         ready_to_pickup: ORDER_STATUS.READY_FOR_PICKUP,
+        ready_forpickup: ORDER_STATUS.READY_FOR_PICKUP,
+        ready_for__pickup: ORDER_STATUS.READY_FOR_PICKUP,
         ready: ORDER_STATUS.READY_FOR_PICKUP,
     };
 
@@ -65,6 +70,19 @@ export const placeOrder = asyncHandler(async (req, res) => {
 
     const order = await getOrderById(orderId);
     const items = await getOrderItems(orderId);
+
+    // Non-blocking transactional emails.
+    void sendEmail({
+        to: order?.customer_email,
+        subject: `Order placed: ${order?.order_number || orderId}`,
+        text: `Your order ${order?.order_number || orderId} has been placed successfully.`,
+    });
+    void sendEmail({
+        to: order?.restaurant_email,
+        subject: `New order received: ${order?.order_number || orderId}`,
+        text: `A new order ${order?.order_number || orderId} was placed and is awaiting action.`,
+    });
+
     sendSuccess(res, { ...order, items }, "Order placed successfully", 201);
 });
 
@@ -86,7 +104,7 @@ export const getOrderDetails = asyncHandler(async (req, res) => {
 
     if (req.user.role === ROLES.RESTAURANT_PARTNER) {
         const restaurant = await getRestaurantByOwnerId(req.user.id);
-        if (restaurant?.id === order.restaurant_id) {
+        if (Number(restaurant?.id) === Number(order.restaurant_id)) {
             const items = await getOrderItems(order.id);
             const logs = await getOrderStatusLogs(order.id);
             return sendSuccess(
@@ -169,7 +187,7 @@ export const updateRestaurantOrderStatus = asyncHandler(async (req, res) => {
     }
 
     const order = await getOrderById(req.params.orderId);
-    if (!order || order.restaurant_id !== restaurant.id) {
+    if (!order || Number(order.restaurant_id) !== Number(restaurant.id)) {
         throw new AppError(404, "Order not found");
     }
 
@@ -195,5 +213,14 @@ export const updateRestaurantOrderStatus = asyncHandler(async (req, res) => {
     });
 
     const updated = await getOrderById(order.id);
+
+    void sendEmail({
+        to: updated?.customer_email,
+        subject: `Order update: ${updated?.order_number || updated?.id}`,
+        text: `Your order ${updated?.order_number || updated?.id} is now ${String(
+            status || ""
+        ).replace(/_/g, " ")}.`,
+    });
+
     sendSuccess(res, updated, "Order status updated successfully");
 });
