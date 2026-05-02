@@ -106,22 +106,44 @@ export const getOrderById = async (orderId) =>
     getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId]);
 
 export const getOrderItems = async (orderId) =>
-    query(
-        `
-        SELECT
-            id,
-            menu_id AS menu_item_id,
-            name,
-            price,
-            qty AS quantity,
-            discount,
-            subtotal
-        FROM order_items
-        WHERE order_id = ?
-        ORDER BY id ASC
-        `,
-        [orderId]
-    );
+    (async () => {
+        try {
+            return await query(
+                `
+                SELECT
+                    id,
+                    menu_id AS menu_item_id,
+                    name,
+                    price,
+                    qty AS quantity,
+                    discount,
+                    subtotal
+                FROM order_items
+                WHERE order_id = ?
+                ORDER BY id ASC
+                `,
+                [orderId]
+            );
+        } catch {
+            // Compatibility fallback for schemas using menu_item_id/quantity/discount_percent.
+            return query(
+                `
+                SELECT
+                    id,
+                    menu_item_id,
+                    name,
+                    price,
+                    quantity,
+                    discount_percent AS discount,
+                    subtotal
+                FROM order_items
+                WHERE order_id = ?
+                ORDER BY id ASC
+                `,
+                [orderId]
+            );
+        }
+    })();
 
 export const getOrderStatusLogs = async (orderId) =>
     query(
@@ -356,7 +378,7 @@ export const cancelOrder = async ({
 };
 
 // ====================== DELIVERY & RESTAURANT ======================
-export const getDeliveryOpenOrders = async () =>
+export const getDeliveryOpenOrders = async (deliveryPartnerId = null) =>
     query(
         `
         SELECT o.id, o.order_number, o.status, o.total, o.delivery_fee, o.created_at,
@@ -367,10 +389,116 @@ export const getDeliveryOpenOrders = async () =>
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         LEFT JOIN users c ON c.id = o.user_id
-        LEFT JOIN delivery_assignments da ON da.order_id = o.id AND da.status IN ('assigned', 'accepted', 'picked_up')
-        WHERE o.status IN ('ready', 'ready_for_pickup', 'prepared') AND da.id IS NULL
+        LEFT JOIN delivery_assignments da ON da.order_id = o.id AND da.status IN ('assigned', 'accepted', 'payment_confirmed', 'picked_up')
+        LEFT JOIN delivery_assignments da_rejected ON da_rejected.order_id = o.id
+            AND da_rejected.delivery_partner_id = ?
+            AND da_rejected.status = 'rejected'
+        WHERE o.status IN ('ready', 'ready_for_pickup', 'prepared')
+          AND da.id IS NULL
+          AND da_rejected.id IS NULL
         ORDER BY o.created_at ASC
+        `,
+        [deliveryPartnerId]
+    );
+
+export const claimReadyOrderAssignment = async ({ orderId, deliveryPartnerId }) =>
+    withTransaction(async (connection) => {
+        const [activeAssignments] = await connection.execute(
+            `
+            SELECT delivery_partner_id, status
+            FROM delivery_assignments
+            WHERE order_id = ? AND status IN ('assigned', 'accepted', 'payment_confirmed', 'picked_up')
+            LIMIT 1
+            FOR UPDATE
+            `,
+            [orderId]
+        );
+
+        if (
+            activeAssignments.length &&
+            Number(activeAssignments[0].delivery_partner_id) !==
+                Number(deliveryPartnerId)
+        ) {
+            return { success: false, reason: "assigned_to_another_partner" };
+        }
+
+        await connection.execute(
+            `
+            INSERT INTO delivery_assignments (
+                order_id,
+                delivery_partner_id,
+                status,
+                assigned_at,
+                accepted_at,
+                rejection_reason,
+                rejected_at
+            ) VALUES (?, ?, 'accepted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL)
+            ON DUPLICATE KEY UPDATE
+                status = 'accepted',
+                accepted_at = CURRENT_TIMESTAMP,
+                rejection_reason = NULL,
+                rejected_at = NULL
+            `,
+            [orderId, deliveryPartnerId]
+        );
+
+        const [orderUpdate] = await connection.execute(
+            `
+            UPDATE orders
+            SET delivery_partner_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND (delivery_partner_id IS NULL OR delivery_partner_id = ?)
+            `,
+            [deliveryPartnerId, orderId, deliveryPartnerId]
+        );
+
+        if (!orderUpdate.affectedRows) {
+            return { success: false, reason: "assigned_to_another_partner" };
+        }
+
+        return { success: true };
+    });
+
+export const markOrderRejectedForPartner = async ({
+    orderId,
+    deliveryPartnerId,
+    rejectionReason,
+}) =>
+    query(
         `
+        INSERT INTO delivery_assignments (
+            order_id,
+            delivery_partner_id,
+            status,
+            assigned_at,
+            rejection_reason,
+            rejected_at
+        ) VALUES (?, ?, 'rejected', CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            status = 'rejected',
+            rejection_reason = VALUES(rejection_reason),
+            rejected_at = CURRENT_TIMESTAMP
+        `,
+        [orderId, deliveryPartnerId, rejectionReason || null]
+    );
+
+export const confirmOrderPaymentByDeliveryPartner = async ({
+    orderId,
+    deliveryPartnerId,
+}) =>
+    query(
+        `
+        UPDATE orders o
+        INNER JOIN delivery_assignments da
+            ON da.order_id = o.id
+            AND da.delivery_partner_id = ?
+        SET o.payment_status = 'completed',
+            o.updated_at = CURRENT_TIMESTAMP
+        WHERE o.id = ?
+          AND o.payment_method = 'cash'
+          AND o.payment_status = 'pending'
+          AND da.status IN ('accepted', 'picked_up', 'delivered')
+        `,
+        [deliveryPartnerId, orderId]
     );
 
 export const createDeliveryAssignment = async ({
@@ -379,7 +507,7 @@ export const createDeliveryAssignment = async ({
 }) =>
     withTransaction(async (connection) => {
         const [existing] = await connection.execute(
-            `SELECT id FROM delivery_assignments WHERE order_id = ? AND status IN ('assigned', 'accepted', 'picked_up') LIMIT 1`,
+            `SELECT id FROM delivery_assignments WHERE order_id = ? AND status IN ('assigned', 'accepted', 'payment_confirmed', 'picked_up') LIMIT 1`,
             [orderId]
         );
         if (existing.length) throw new Error("Order already assigned");
@@ -516,7 +644,7 @@ export const adminAssignOrder = async ({
 }) =>
     withTransaction(async (connection) => {
         const [existing] = await connection.execute(
-            `SELECT id FROM delivery_assignments WHERE order_id = ? AND status IN ('assigned', 'accepted', 'picked_up') LIMIT 1`,
+            `SELECT id FROM delivery_assignments WHERE order_id = ? AND status IN ('assigned', 'accepted', 'payment_confirmed', 'picked_up') LIMIT 1`,
             [orderId]
         );
         if (existing.length) throw new Error("Order already assigned");

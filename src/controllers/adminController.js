@@ -712,7 +712,7 @@ export const assignDeliveryPartner = async (req, res) => {
                     SELECT COUNT(*) AS pending_count
                     FROM delivery_assignments
                     WHERE delivery_partner_id = ?
-                    AND status IN ('assigned', 'accepted')
+                    AND status IN ('assigned', 'accepted', 'payment_confirmed', 'picked_up')
                 `,
                     [order.delivery_partner_id]
                 );
