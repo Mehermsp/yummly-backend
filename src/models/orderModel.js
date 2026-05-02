@@ -980,7 +980,7 @@ export const getDeliveryOpenOrders = async () =>
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         LEFT JOIN delivery_assignments da ON da.order_id = o.id AND da.status IN ('assigned', 'accepted', 'picked_up')
-        WHERE o.status IN ('ready', 'ready_for_pickup') AND da.id IS NULL
+        WHERE o.status = 'ready_for_pickup' AND da.id IS NULL
         ORDER BY o.created_at ASC
         `
     );
