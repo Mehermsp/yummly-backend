@@ -1009,6 +1009,8 @@ export const getDeliveryPartners = async (req, res) => {
 export const getDeliveryPartnerById = async (req, res) => {
     try {
         const { id } = req.params;
+
+        // 🔹 Basic partner info
         const partners = await query(
             `
             SELECT 
@@ -1021,8 +1023,9 @@ export const getDeliveryPartnerById = async (req, res) => {
                 u.role,
                 u.created_at,
                 u.delivery_fee_per_order,
+
                 (SELECT COUNT(*) FROM orders WHERE delivery_partner_id = u.id AND status = 'delivered') as total_deliveries,
-                (SELECT COUNT(*) FROM orders WHERE delivery_partner_id = u.id AND status = 'delivered') as completed_orders,
+
                 (
                     SELECT AVG(rv.delivery_rating)
                     FROM orders od
@@ -1030,32 +1033,79 @@ export const getDeliveryPartnerById = async (req, res) => {
                     WHERE od.delivery_partner_id = u.id
                     AND rv.delivery_rating IS NOT NULL
                 ) as rating,
+
                 (SELECT COUNT(*) FROM delivery_assignments WHERE delivery_partner_id = u.id AND status = 'assigned') as pending_assignments,
+
                 (SELECT COALESCE(SUM(delivery_fee), 0) FROM orders WHERE delivery_partner_id = u.id AND status = 'delivered') as total_earnings
+
             FROM users u
             WHERE u.id = ? AND u.role = 'delivery_partner'
         `,
             [id]
         );
 
-        if (partners.length === 0) {
+        if (!partners.length) {
             return res
                 .status(404)
                 .json({ error: "Delivery partner not found" });
         }
 
         const partner = partners[0];
+
+        // 🔹 Status mapping
         partner.status = partner.is_available
             ? partner.pending_assignments > 0
                 ? "busy"
                 : "active"
             : "inactive";
-        partner.total_deliveries = partner.total_deliveries || 0;
-        partner.completed_orders = partner.completed_orders || 0;
+
         partner.rating = partner.rating
             ? parseFloat(partner.rating).toFixed(1)
             : "N/A";
+
         partner.total_earnings = parseFloat(partner.total_earnings) || 0;
+
+        // 🔥 NEW: Recent Orders
+        const recentOrders = await query(
+            `
+            SELECT 
+                o.id,
+                o.order_number,
+                o.total,
+                o.status,
+                o.city,
+                o.area,
+                o.created_at,
+                o.delivered_at
+            FROM orders o
+            WHERE o.delivery_partner_id = ?
+            ORDER BY o.created_at DESC
+            LIMIT 5
+        `,
+            [id]
+        );
+
+        partner.recent_orders = recentOrders;
+
+        // 🔥 NEW: Delivery Timeline Data
+        const assignmentHistory = await query(
+            `
+            SELECT 
+                da.order_id,
+                da.assigned_at,
+                da.accepted_at,
+                da.pickup_time,
+                da.delivery_time,
+                da.status
+            FROM delivery_assignments da
+            WHERE da.delivery_partner_id = ?
+            ORDER BY da.assigned_at DESC
+            LIMIT 5
+        `,
+            [id]
+        );
+
+        partner.delivery_history = assignmentHistory;
 
         res.json(partner);
     } catch (error) {
