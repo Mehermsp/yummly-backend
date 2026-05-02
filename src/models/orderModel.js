@@ -105,45 +105,103 @@ export const listCustomerOrders = async (customerId, status) =>
 export const getOrderById = async (orderId) =>
     getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId]);
 
-export const getOrderItems = async (orderId) =>
-    (async () => {
+const enrichOrderItemsWithImages = async (items) => {
+    if (!items?.length) return [];
+
+    const uniqueMenuIds = [
+        ...new Set(
+            items
+                .map((item) => Number(item.menu_item_id || item.menu_id || 0))
+                .filter((id) => Number.isFinite(id) && id > 0)
+        ),
+    ];
+
+    if (!uniqueMenuIds.length) return items;
+
+    const placeholders = uniqueMenuIds.map(() => "?").join(", ");
+    const imageMap = new Map();
+
+    try {
+        const rows = await query(
+            `
+            SELECT id, image_url
+            FROM menu_items
+            WHERE id IN (${placeholders})
+            `,
+            uniqueMenuIds
+        );
+        rows.forEach((row) => {
+            imageMap.set(Number(row.id), row.image_url || null);
+        });
+    } catch {
         try {
-            return await query(
+            // Compatibility with schemas where menu image column is `image`.
+            const rows = await query(
                 `
-                SELECT
-                    id,
-                    menu_id AS menu_item_id,
-                    name,
-                    price,
-                    qty AS quantity,
-                    discount,
-                    subtotal
-                FROM order_items
-                WHERE order_id = ?
-                ORDER BY id ASC
+                SELECT id, image
+                FROM menu_items
+                WHERE id IN (${placeholders})
                 `,
-                [orderId]
+                uniqueMenuIds
             );
+            rows.forEach((row) => {
+                imageMap.set(Number(row.id), row.image || null);
+            });
         } catch {
-            // Compatibility fallback for schemas using menu_item_id/quantity/discount_percent.
-            return query(
-                `
-                SELECT
-                    id,
-                    menu_item_id,
-                    name,
-                    price,
-                    quantity,
-                    discount_percent AS discount,
-                    subtotal
-                FROM order_items
-                WHERE order_id = ?
-                ORDER BY id ASC
-                `,
-                [orderId]
-            );
+            return items;
         }
-    })();
+    }
+
+    return items.map((item) => {
+        const menuId = Number(item.menu_item_id || item.menu_id || 0);
+        return {
+            ...item,
+            image_url: item.image_url || imageMap.get(menuId) || null,
+        };
+    });
+};
+
+export const getOrderItems = async (orderId) => {
+    let rows;
+    try {
+        rows = await query(
+            `
+            SELECT
+                id,
+                menu_id AS menu_item_id,
+                name,
+                price,
+                qty AS quantity,
+                discount,
+                subtotal
+            FROM order_items
+            WHERE order_id = ?
+            ORDER BY id ASC
+            `,
+            [orderId]
+        );
+    } catch {
+        // Compatibility fallback for schemas using menu_item_id/quantity/discount_percent.
+        rows = await query(
+            `
+            SELECT
+                id,
+                menu_item_id,
+                name,
+                price,
+                quantity,
+                discount_percent AS discount,
+                subtotal
+            FROM order_items
+            WHERE order_id = ?
+            ORDER BY id ASC
+            `,
+            [orderId]
+        );
+    }
+
+    return enrichOrderItemsWithImages(rows);
+};
 
 export const getOrderStatusLogs = async (orderId) =>
     query(
@@ -381,11 +439,24 @@ export const cancelOrder = async ({
 export const getDeliveryOpenOrders = async (deliveryPartnerId = null) =>
     query(
         `
-        SELECT o.id, o.order_number, o.status, o.total, o.delivery_fee, o.created_at,
-               r.name AS restaurant_name, r.address AS restaurant_address, r.cover_image AS restaurant_image,
-               r.phone AS restaurant_phone,
-               o.door_no, o.street, o.area, o.city, o.state, o.zip_code,
-               c.name AS customer_name, c.phone AS customer_phone
+        SELECT o.id,
+               COALESCE(o.order_number, '') AS order_number,
+               COALESCE(o.status, '') AS status,
+               COALESCE(o.total, 0) AS total,
+               COALESCE(o.delivery_fee, 0) AS delivery_fee,
+               o.created_at,
+               COALESCE(r.name, '') AS restaurant_name,
+               COALESCE(r.address, '') AS restaurant_address,
+               COALESCE(r.cover_image, '') AS restaurant_image,
+               COALESCE(r.phone, '') AS restaurant_phone,
+               COALESCE(o.door_no, '') AS door_no,
+               COALESCE(o.street, '') AS street,
+               COALESCE(o.area, '') AS area,
+               COALESCE(o.city, '') AS city,
+               COALESCE(o.state, '') AS state,
+               COALESCE(o.zip_code, '') AS zip_code,
+               COALESCE(c.name, '') AS customer_name,
+               COALESCE(c.phone, '') AS customer_phone
         FROM orders o
         INNER JOIN restaurants r ON r.id = o.restaurant_id
         LEFT JOIN users c ON c.id = o.user_id
@@ -484,22 +555,41 @@ export const markOrderRejectedForPartner = async ({
 export const confirmOrderPaymentByDeliveryPartner = async ({
     orderId,
     deliveryPartnerId,
-}) =>
-    query(
-        `
-        UPDATE orders o
-        INNER JOIN delivery_assignments da
-            ON da.order_id = o.id
-            AND da.delivery_partner_id = ?
-        SET o.payment_status = 'completed',
-            o.updated_at = CURRENT_TIMESTAMP
-        WHERE o.id = ?
-          AND o.payment_method = 'cash'
-          AND o.payment_status = 'pending'
-          AND da.status IN ('accepted', 'picked_up', 'delivered')
-        `,
-        [deliveryPartnerId, orderId]
-    );
+}) => {
+    const candidateStatuses = ["completed", "paid", "confirmed", "success"];
+    let lastError = null;
+
+    for (const paymentStatus of candidateStatuses) {
+        try {
+            const result = await query(
+                `
+                UPDATE orders o
+                INNER JOIN delivery_assignments da
+                    ON da.order_id = o.id
+                    AND da.delivery_partner_id = ?
+                SET o.payment_status = ?,
+                    o.updated_at = CURRENT_TIMESTAMP
+                WHERE o.id = ?
+                  AND o.payment_method = 'cash'
+                  AND o.payment_status = 'pending'
+                  AND da.status IN ('accepted', 'payment_confirmed', 'picked_up', 'delivered')
+                `,
+                [deliveryPartnerId, paymentStatus, orderId]
+            );
+            return { ...result, paymentStatus };
+        } catch (error) {
+            const message = String(error?.message || "").toLowerCase();
+            if (message.includes("data truncated for column 'payment_status'")) {
+                lastError = error;
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    if (lastError) throw lastError;
+    return { affectedRows: 0 };
+};
 
 export const createDeliveryAssignment = async ({
     orderId,
@@ -598,35 +688,35 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
             da.assigned_at,
             da.accepted_at,
             da.delivery_time,
-            o.order_number, 
-            o.status AS order_status,
-            o.subtotal,
-            o.discount_amount,
-            o.delivery_fee,
-            o.tax_amount,
-            o.total, 
-            o.payment_method,
-            o.payment_status,
+            COALESCE(o.order_number, '') AS order_number, 
+            COALESCE(o.status, '') AS order_status,
+            COALESCE(o.subtotal, 0) AS subtotal,
+            COALESCE(o.discount_amount, 0) AS discount_amount,
+            COALESCE(o.delivery_fee, 0) AS delivery_fee,
+            COALESCE(o.tax_amount, 0) AS tax_amount,
+            COALESCE(o.total, 0) AS total, 
+            COALESCE(o.payment_method, '') AS payment_method,
+            COALESCE(o.payment_status, '') AS payment_status,
             o.created_at,
-            o.notes AS customer_notes,
+            COALESCE(o.notes, '') AS customer_notes,
             -- Restaurant details
-            r.name AS restaurant_name,
-            r.address AS restaurant_address,
-            r.cover_image AS restaurant_image,
-            r.phone AS restaurant_phone,
-            r.email AS restaurant_email,
+            COALESCE(r.name, '') AS restaurant_name,
+            COALESCE(r.address, '') AS restaurant_address,
+            COALESCE(r.cover_image, '') AS restaurant_image,
+            COALESCE(r.phone, '') AS restaurant_phone,
+            COALESCE(r.email, '') AS restaurant_email,
             -- Customer details
-            c.name AS customer_name,
-            c.phone AS customer_phone,
-            c.email AS customer_email,
+            COALESCE(c.name, '') AS customer_name,
+            COALESCE(c.phone, '') AS customer_phone,
+            COALESCE(c.email, '') AS customer_email,
             -- Delivery address
-            o.door_no,
-            o.street,
-            o.area,
-            o.city,
-            o.state,
-            o.zip_code,
-            o.phone AS delivery_phone
+            COALESCE(o.door_no, '') AS door_no,
+            COALESCE(o.street, '') AS street,
+            COALESCE(o.area, '') AS area,
+            COALESCE(o.city, '') AS city,
+            COALESCE(o.state, '') AS state,
+            COALESCE(o.zip_code, '') AS zip_code,
+            COALESCE(o.phone, '') AS delivery_phone
         FROM delivery_assignments da
         INNER JOIN orders o ON o.id = da.order_id
         INNER JOIN restaurants r ON r.id = o.restaurant_id

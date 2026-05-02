@@ -272,7 +272,10 @@ export const confirmDeliveryOrderPayment = asyncHandler(async (req, res) => {
     if (String(order.payment_method).toLowerCase() !== "cash") {
         throw new AppError(400, "Only cash orders require manual payment confirmation");
     }
-    if (String(order.payment_status).toLowerCase() === "completed") {
+    const normalizedPaymentStatus = String(order.payment_status || "")
+        .trim()
+        .toLowerCase();
+    if (["completed", "paid", "confirmed", "success"].includes(normalizedPaymentStatus)) {
         return sendSuccess(res, null, "Payment already confirmed");
     }
 
@@ -303,11 +306,25 @@ export const confirmDeliveryOrderPayment = asyncHandler(async (req, res) => {
         throw new AppError(400, "Payment is not pending for this order");
     }
 
-    await updateAssignmentStatus({
-        orderId: req.params.orderId,
-        deliveryPartnerId: req.user.id,
-        status: DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
-    });
+    try {
+        await updateAssignmentStatus({
+            orderId: req.params.orderId,
+            deliveryPartnerId: req.user.id,
+            status: DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
+        });
+    } catch (error) {
+        const message = String(error?.message || "").toLowerCase();
+        if (!message.includes("data truncated for column 'status'")) {
+            throw error;
+        }
+        // Compatibility fallback for DBs where delivery_assignments enum
+        // does not yet include `payment_confirmed`.
+        await updateAssignmentStatus({
+            orderId: req.params.orderId,
+            deliveryPartnerId: req.user.id,
+            status: DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
+        });
+    }
 
     sendSuccess(res, null, "Payment confirmed successfully");
 });
