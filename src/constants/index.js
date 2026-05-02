@@ -20,6 +20,7 @@ export const ORDER_STATUS = {
 export const DELIVERY_ASSIGNMENT_STATUS = {
     ASSIGNED: "assigned",
     ACCEPTED: "accepted",
+    PAYMENT_CONFIRMED: "payment_confirmed",
     REJECTED: "rejected",
     PICKED_UP: "picked_up",
     DELIVERED: "delivered",

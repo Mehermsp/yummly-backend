@@ -2,13 +2,16 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 import { updateDeliveryAvailability } from "../models/userModel.js";
 import {
+    claimReadyOrderAssignment,
     clearOrderDeliveryPartner,
+    confirmOrderPaymentByDeliveryPartner,
     getDeliveryOpenOrders,
     getAssignmentForOrderAndPartner,
     getDeliveryPartnerStats,
     getOrderById,
     getOrderItems,
     listDeliveryAssignments,
+    markOrderRejectedForPartner,
     updateAssignmentStatus,
     updateOrderStatus,
 } from "../models/orderModel.js";
@@ -46,8 +49,14 @@ const isAcceptanceWindowOpen = (assignedAt) => {
 };
 
 export const getDeliveryDashboard = asyncHandler(async (req, res) => {
-    const openOrders = await getDeliveryOpenOrders();
+    const openOrders = await getDeliveryOpenOrders(req.user.id);
     const assignments = await listDeliveryAssignments(req.user.id);
+    const assignmentsWithItems = await Promise.all(
+        assignments.map(async (assignment) => {
+            const items = await getOrderItems(assignment.order_id);
+            return { ...assignment, items };
+        })
+    );
     const stats = await getDeliveryPartnerStats(req.user.id);
 
     sendSuccess(
@@ -55,7 +64,7 @@ export const getDeliveryDashboard = asyncHandler(async (req, res) => {
         {
             profile: req.user,
             openOrders,
-            assignments,
+            assignments: assignmentsWithItems,
             stats,
         },
         "Delivery dashboard fetched successfully"
@@ -136,11 +145,7 @@ export const acceptDeliveryOrder = asyncHandler(async (req, res) => {
         "ready_for_pickup",
     ];
 
-    if (
-        !order ||
-        Number(order.delivery_partner_id) !== Number(req.user.id) ||
-        !allowedStatuses.includes(order.status)
-    ) {
+    if (!order || !allowedStatuses.includes(order.status)) {
         throw new AppError(404, "Ready order not found");
     }
 
@@ -148,58 +153,96 @@ export const acceptDeliveryOrder = asyncHandler(async (req, res) => {
         order.id,
         req.user.id
     );
-    if (!assignment) {
-        throw new AppError(403, "Order is not assigned to you");
-    }
-
-    if (assignment.status === DELIVERY_ASSIGNMENT_STATUS.ACCEPTED) {
+    if (
+        assignment?.status === DELIVERY_ASSIGNMENT_STATUS.ACCEPTED ||
+        assignment?.status === DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED ||
+        assignment?.status === DELIVERY_ASSIGNMENT_STATUS.PICKED_UP
+    ) {
         return sendSuccess(res, null, "Delivery assignment already accepted");
     }
 
-    if (assignment.status !== DELIVERY_ASSIGNMENT_STATUS.ASSIGNED) {
+    const assignedToCurrentPartner =
+        Number(order.delivery_partner_id) === Number(req.user.id);
+    const hasDifferentAssignedPartner =
+        order.delivery_partner_id &&
+        Number(order.delivery_partner_id) !== Number(req.user.id);
+
+    if (hasDifferentAssignedPartner) {
+        throw new AppError(409, "Order is already assigned to another partner");
+    }
+
+    if (
+        assignment &&
+        assignment.status !== DELIVERY_ASSIGNMENT_STATUS.ASSIGNED
+    ) {
         throw new AppError(400, "Assignment is not in assignable state");
     }
 
-    if (!isAcceptanceWindowOpen(assignment.assigned_at)) {
+    if (assignedToCurrentPartner && assignment) {
+        if (!isAcceptanceWindowOpen(assignment.assigned_at)) {
+            await updateAssignmentStatus({
+                orderId: order.id,
+                deliveryPartnerId: req.user.id,
+                status: DELIVERY_ASSIGNMENT_STATUS.REJECTED,
+                rejectionReason: "Acceptance window expired (5 minutes)",
+            });
+            await clearOrderDeliveryPartner(order.id, req.user.id);
+            await updateDeliveryAvailability(req.user.id, true);
+            throw new AppError(
+                400,
+                "Acceptance window expired. Please wait for reassignment."
+            );
+        }
+
         await updateAssignmentStatus({
             orderId: order.id,
             deliveryPartnerId: req.user.id,
-            status: DELIVERY_ASSIGNMENT_STATUS.REJECTED,
-            rejectionReason: "Acceptance window expired (5 minutes)",
+            status: DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
         });
-        await clearOrderDeliveryPartner(order.id, req.user.id);
-        await updateDeliveryAvailability(req.user.id, true);
-        throw new AppError(
-            400,
-            "Acceptance window expired. Please wait for reassignment."
-        );
+        await updateDeliveryAvailability(req.user.id, false);
+        return sendSuccess(res, null, "Delivery assignment accepted");
     }
 
-    await updateAssignmentStatus({
+    const claimResult = await claimReadyOrderAssignment({
         orderId: order.id,
         deliveryPartnerId: req.user.id,
-        status: DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
     });
-    await updateDeliveryAvailability(req.user.id, false);
+    if (!claimResult?.success) {
+        throw new AppError(409, "Order is already assigned to another partner");
+    }
 
+    await updateDeliveryAvailability(req.user.id, false);
     sendSuccess(res, null, "Delivery assignment accepted");
 });
 
 export const rejectDeliveryOrder = asyncHandler(async (req, res) => {
     const order = await getOrderById(req.params.orderId);
-    if (!order || Number(order.delivery_partner_id) !== Number(req.user.id)) {
-        throw new AppError(404, "Order not found or not assigned to you");
-    }
+    if (!order) throw new AppError(404, "Order not found");
 
     const assignment = await getAssignmentForOrderAndPartner(
         req.params.orderId,
         req.user.id
     );
     if (!assignment) {
-        throw new AppError(403, "Order assignment not found");
+        const assignedToOtherPartner =
+            order.delivery_partner_id &&
+            Number(order.delivery_partner_id) !== Number(req.user.id);
+        if (assignedToOtherPartner) {
+            throw new AppError(404, "Order not found or not assigned to you");
+        }
+
+        await markOrderRejectedForPartner({
+            orderId: req.params.orderId,
+            deliveryPartnerId: req.user.id,
+            rejectionReason:
+                req.body.reason || "Skipped by delivery partner from open list",
+        });
+        return sendSuccess(res, null, "Order skipped");
     }
+
     if (
         [
+            DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
             DELIVERY_ASSIGNMENT_STATUS.PICKED_UP,
             DELIVERY_ASSIGNMENT_STATUS.DELIVERED,
         ].includes(assignment.status)
@@ -219,6 +262,54 @@ export const rejectDeliveryOrder = asyncHandler(async (req, res) => {
     await updateDeliveryAvailability(req.user.id, true);
 
     sendSuccess(res, null, "Delivery assignment rejected");
+});
+
+export const confirmDeliveryOrderPayment = asyncHandler(async (req, res) => {
+    const order = await getOrderById(req.params.orderId);
+    if (!order || Number(order.delivery_partner_id) !== Number(req.user.id)) {
+        throw new AppError(404, "Order not found or not assigned to you");
+    }
+    if (String(order.payment_method).toLowerCase() !== "cash") {
+        throw new AppError(400, "Only cash orders require manual payment confirmation");
+    }
+    if (String(order.payment_status).toLowerCase() === "completed") {
+        return sendSuccess(res, null, "Payment already confirmed");
+    }
+
+    const assignment = await getAssignmentForOrderAndPartner(
+        req.params.orderId,
+        req.user.id
+    );
+    if (
+        !assignment ||
+        ![
+            DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
+            DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
+            DELIVERY_ASSIGNMENT_STATUS.PICKED_UP,
+            DELIVERY_ASSIGNMENT_STATUS.DELIVERED,
+        ].includes(assignment.status)
+    ) {
+        throw new AppError(
+            400,
+            "Accept the assignment before confirming payment"
+        );
+    }
+
+    const result = await confirmOrderPaymentByDeliveryPartner({
+        orderId: req.params.orderId,
+        deliveryPartnerId: req.user.id,
+    });
+    if (!result?.affectedRows) {
+        throw new AppError(400, "Payment is not pending for this order");
+    }
+
+    await updateAssignmentStatus({
+        orderId: req.params.orderId,
+        deliveryPartnerId: req.user.id,
+        status: DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
+    });
+
+    sendSuccess(res, null, "Payment confirmed successfully");
 });
 
 export const pickupDeliveryOrder = asyncHandler(async (req, res) => {
@@ -247,6 +338,7 @@ export const pickupDeliveryOrder = asyncHandler(async (req, res) => {
     if (
         ![
             DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
+            DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
             DELIVERY_ASSIGNMENT_STATUS.PICKED_UP,
         ].includes(assignment.status)
     ) {
@@ -309,6 +401,7 @@ export const completeDeliveryOrder = asyncHandler(async (req, res) => {
         ![
             DELIVERY_ASSIGNMENT_STATUS.PICKED_UP,
             DELIVERY_ASSIGNMENT_STATUS.ACCEPTED,
+            DELIVERY_ASSIGNMENT_STATUS.PAYMENT_CONFIRMED,
         ].includes(assignment.status)
     ) {
         throw new AppError(
