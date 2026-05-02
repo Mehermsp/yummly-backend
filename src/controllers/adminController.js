@@ -1,5 +1,21 @@
 import { query, withTransaction } from "../config/db.js";
 
+const isUnknownColumnError = (error) =>
+    error?.code === "ER_BAD_FIELD_ERROR" ||
+    String(error?.message || "").toLowerCase().includes("unknown column");
+
+const ensureAdminSettingsTable = async () => {
+    await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            setting_key VARCHAR(120) NOT NULL UNIQUE,
+            setting_value TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    `);
+};
+
 // Get Dashboard Statistics
 export const getStatistics = async (req, res) => {
     try {
@@ -84,7 +100,42 @@ export const getApplications = async (req, res) => {
                 sql += ` LIMIT ${parseInt(limit)}`;
             }
 
-            applications = await query(sql);
+            try {
+                applications = await query(sql);
+            } catch (error) {
+                if (!isUnknownColumnError(error)) throw error;
+
+                // Compatibility with schemas using fssai/gst/pan column names.
+                let fallbackSql = `
+                    SELECT 
+                        id,
+                        owner_id as user_id,
+                        owner_name,
+                        email,
+                        phone,
+                        restaurant_name,
+                        address,
+                        city,
+                        pincode,
+                        NULL as state,
+                        cuisines as cuisine_type,
+                        open_time as opening_time,
+                        close_time as closing_time,
+                        fssai as license_number,
+                        gst as gst_number,
+                        pan as pan_number,
+                        status,
+                        review_notes as rejection_reason,
+                        created_at,
+                        updated_at
+                    FROM restaurant_applications
+                    ORDER BY created_at DESC
+                `;
+                if (limit) {
+                    fallbackSql += ` LIMIT ${parseInt(limit)}`;
+                }
+                applications = await query(fallbackSql);
+            }
         } catch (tableError) {
             // Table might not exist - return empty array instead of error
             console.warn(
@@ -108,39 +159,77 @@ export const getApplications = async (req, res) => {
 export const getApplicationById = async (req, res) => {
     try {
         const { id } = req.params;
-        const applications = await query(
-            `
-            SELECT 
-                id,
-                owner_id as user_id,
-                owner_name,
-                email,
-                phone,
-                restaurant_name,
-                address,
-                city,
-                pincode,
-                NULL as state,
-                landmark,
-                cuisines as cuisine_type,
-                open_time as opening_time,
-                close_time as closing_time,
-                days_open,
-fssai_number as license_number,
-                gst_number as gst_number,
-                pan_number as pan_number,
-                logo,
-                status,
-                review_notes as rejection_reason,
-                reviewed_by,
-                reviewed_at,
-                created_at,
-                updated_at
-            FROM restaurant_applications 
-            WHERE id = ?
-        `,
-            [id]
-        );
+        let applications;
+        try {
+            applications = await query(
+                `
+                SELECT 
+                    id,
+                    owner_id as user_id,
+                    owner_name,
+                    email,
+                    phone,
+                    restaurant_name,
+                    address,
+                    city,
+                    pincode,
+                    NULL as state,
+                    landmark,
+                    cuisines as cuisine_type,
+                    open_time as opening_time,
+                    close_time as closing_time,
+                    days_open,
+                    fssai_number as license_number,
+                    gst_number as gst_number,
+                    pan_number as pan_number,
+                    logo,
+                    status,
+                    review_notes as rejection_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                FROM restaurant_applications 
+                WHERE id = ?
+            `,
+                [id]
+            );
+        } catch (error) {
+            if (!isUnknownColumnError(error)) throw error;
+            applications = await query(
+                `
+                SELECT 
+                    id,
+                    owner_id as user_id,
+                    owner_name,
+                    email,
+                    phone,
+                    restaurant_name,
+                    address,
+                    city,
+                    pincode,
+                    NULL as state,
+                    landmark,
+                    cuisines as cuisine_type,
+                    open_time as opening_time,
+                    close_time as closing_time,
+                    days_open,
+                    fssai as license_number,
+                    gst as gst_number,
+                    pan as pan_number,
+                    logo,
+                    status,
+                    review_notes as rejection_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                FROM restaurant_applications 
+                WHERE id = ?
+            `,
+                [id]
+            );
+        }
 
         if (applications.length === 0) {
             return res.status(404).json({ error: "Application not found" });
@@ -184,7 +273,7 @@ export const approveApplication = async (req, res) => {
                 INSERT INTO restaurants (
                     user_id, owner_id, name, email, phone, 
                     description, address, city, state, pincode, landmark,
-cuisines, open_time, close_time, days_open,
+                    cuisines, open_time, close_time, days_open,
                     fssai_number, gst_number, pan_number, logo, is_active, is_approved, status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'approved')
             `,
@@ -204,12 +293,47 @@ cuisines, open_time, close_time, days_open,
                     app.open_time,
                     app.close_time,
                     app.days_open || "[]",
-                    app.fssai_number,
-                    app.gst_number,
-                    app.pan_number,
+                    app.fssai_number || app.fssai || null,
+                    app.gst_number || app.gst || null,
+                    app.pan_number || app.pan || null,
                     app.logo || "",
                 ]
-            );
+            ).catch(async (error) => {
+                if (!isUnknownColumnError(error)) throw error;
+
+                // Compatibility with schemas using fssai/gst/pan columns.
+                await connection.execute(
+                    `
+                    INSERT INTO restaurants (
+                        user_id, owner_id, name, email, phone, 
+                        description, address, city, state, pincode, landmark,
+                        cuisines, open_time, close_time, days_open,
+                        fssai, gst, pan, logo, is_active, is_approved, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'approved')
+                `,
+                    [
+                        app.owner_id,
+                        app.owner_id,
+                        app.restaurant_name,
+                        app.email,
+                        app.phone,
+                        "",
+                        app.address,
+                        app.city,
+                        "",
+                        app.pincode,
+                        app.landmark || "",
+                        app.cuisines || "[]",
+                        app.open_time,
+                        app.close_time,
+                        app.days_open || "[]",
+                        app.fssai_number || app.fssai || null,
+                        app.gst_number || app.gst || null,
+                        app.pan_number || app.pan || null,
+                        app.logo || "",
+                    ]
+                );
+            });
         });
 
         res.json({
@@ -249,45 +373,88 @@ export const getRestaurants = async (req, res) => {
     try {
         let restaurants = [];
         try {
-            restaurants = await query(`
-                SELECT 
-                    r.id,
-                    r.name as restaurant_name,
-                    r.user_id,
-                    r.owner_id,
-                    r.email,
-                    r.phone,
-                    r.description,
-                    r.image_url,
-                    r.logo,
-                    r.cover_image,
-                    r.address,
-                    r.city,
-                    r.state,
-                    r.pincode,
-                    r.landmark,
-                    r.cuisines as cuisine_type,
-                    r.open_time as opening_time,
-                    r.close_time as closing_time,
-                    r.days_open,
-                    r.fssai_number as license_number,
-                    r.gst_number as gst_number,
-                    r.pan_number as pan_number,
-                    r.rating,
-                    r.is_open,
-                    r.is_active,
-                    r.total_orders,
-                    r.total_revenue,
-                    r.platform_fee_percent,
-                    r.created_at,
-                    r.updated_at,
-                    u.name as owner_name,
-                    u.email as owner_email,
-                    u.phone as owner_phone
-                FROM restaurants r
-                LEFT JOIN users u ON r.user_id = u.id
-                ORDER BY r.created_at DESC
-            `);
+            try {
+                restaurants = await query(`
+                    SELECT 
+                        r.id,
+                        r.name as restaurant_name,
+                        r.user_id,
+                        r.owner_id,
+                        r.email,
+                        r.phone,
+                        r.description,
+                        r.image_url,
+                        r.logo,
+                        r.cover_image,
+                        r.address,
+                        r.city,
+                        r.state,
+                        r.pincode,
+                        r.landmark,
+                        r.cuisines as cuisine_type,
+                        r.open_time as opening_time,
+                        r.close_time as closing_time,
+                        r.days_open,
+                        r.fssai_number as license_number,
+                        r.gst_number as gst_number,
+                        r.pan_number as pan_number,
+                        r.rating,
+                        r.is_open,
+                        r.is_active,
+                        r.total_orders,
+                        r.total_revenue,
+                        r.platform_fee_percent,
+                        r.created_at,
+                        r.updated_at,
+                        u.name as owner_name,
+                        u.email as owner_email,
+                        u.phone as owner_phone
+                    FROM restaurants r
+                    LEFT JOIN users u ON r.user_id = u.id
+                    ORDER BY r.created_at DESC
+                `);
+            } catch (error) {
+                if (!isUnknownColumnError(error)) throw error;
+                restaurants = await query(`
+                    SELECT 
+                        r.id,
+                        r.name as restaurant_name,
+                        r.user_id,
+                        r.owner_id,
+                        r.email,
+                        r.phone,
+                        r.description,
+                        r.image_url,
+                        r.logo,
+                        r.cover_image,
+                        r.address,
+                        r.city,
+                        r.state,
+                        r.pincode,
+                        r.landmark,
+                        r.cuisines as cuisine_type,
+                        r.open_time as opening_time,
+                        r.close_time as closing_time,
+                        r.days_open,
+                        r.fssai as license_number,
+                        r.gst as gst_number,
+                        r.pan as pan_number,
+                        r.rating,
+                        r.is_open,
+                        r.is_active,
+                        r.total_orders,
+                        r.total_revenue,
+                        r.platform_fee_percent,
+                        r.created_at,
+                        r.updated_at,
+                        u.name as owner_name,
+                        u.email as owner_email,
+                        u.phone as owner_phone
+                    FROM restaurants r
+                    LEFT JOIN users u ON r.user_id = u.id
+                    ORDER BY r.created_at DESC
+                `);
+            }
         } catch (joinError) {
             // If LEFT JOIN fails, try simpler query without user join
             console.warn(
@@ -337,47 +504,93 @@ export const getRestaurants = async (req, res) => {
 export const getRestaurantById = async (req, res) => {
     try {
         const { id } = req.params;
-        const restaurants = await query(
-            `
-            SELECT 
-                r.id,
-                r.name as restaurant_name,
-                r.user_id,
-                r.owner_id,
-                r.email,
-                r.phone,
-                r.description,
-                r.image_url,
-                r.logo,
-                r.cover_image,
-                r.address,
-                r.city,
-                r.state,
-                r.pincode,
-                r.landmark,
-                r.cuisines as cuisine_type,
-                r.open_time as opening_time,
-                r.close_time as closing_time,
-                r.days_open,
-r.fssai_number as license_number,
-                r.gst_number as gst_number,
-                r.pan_number as pan_number,
-                r.rating,
-                r.is_open,
-                r.is_active,
-                r.total_orders,
-                r.total_revenue,
-                r.created_at,
-                r.updated_at,
-                u.name as owner_name,
-                u.email as owner_email,
-                u.phone as owner_phone
-            FROM restaurants r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.id = ?
-        `,
-            [id]
-        );
+        let restaurants;
+        try {
+            restaurants = await query(
+                `
+                SELECT 
+                    r.id,
+                    r.name as restaurant_name,
+                    r.user_id,
+                    r.owner_id,
+                    r.email,
+                    r.phone,
+                    r.description,
+                    r.image_url,
+                    r.logo,
+                    r.cover_image,
+                    r.address,
+                    r.city,
+                    r.state,
+                    r.pincode,
+                    r.landmark,
+                    r.cuisines as cuisine_type,
+                    r.open_time as opening_time,
+                    r.close_time as closing_time,
+                    r.days_open,
+                    r.fssai_number as license_number,
+                    r.gst_number as gst_number,
+                    r.pan_number as pan_number,
+                    r.rating,
+                    r.is_open,
+                    r.is_active,
+                    r.total_orders,
+                    r.total_revenue,
+                    r.created_at,
+                    r.updated_at,
+                    u.name as owner_name,
+                    u.email as owner_email,
+                    u.phone as owner_phone
+                FROM restaurants r
+                LEFT JOIN users u ON r.user_id = u.id
+                WHERE r.id = ?
+            `,
+                [id]
+            );
+        } catch (error) {
+            if (!isUnknownColumnError(error)) throw error;
+            restaurants = await query(
+                `
+                SELECT 
+                    r.id,
+                    r.name as restaurant_name,
+                    r.user_id,
+                    r.owner_id,
+                    r.email,
+                    r.phone,
+                    r.description,
+                    r.image_url,
+                    r.logo,
+                    r.cover_image,
+                    r.address,
+                    r.city,
+                    r.state,
+                    r.pincode,
+                    r.landmark,
+                    r.cuisines as cuisine_type,
+                    r.open_time as opening_time,
+                    r.close_time as closing_time,
+                    r.days_open,
+                    r.fssai as license_number,
+                    r.gst as gst_number,
+                    r.pan as pan_number,
+                    r.rating,
+                    r.is_open,
+                    r.is_active,
+                    r.total_orders,
+                    r.total_revenue,
+                    r.created_at,
+                    r.updated_at,
+                    u.name as owner_name,
+                    u.email as owner_email,
+                    u.phone as owner_phone
+                FROM restaurants r
+                LEFT JOIN users u ON r.user_id = u.id
+                WHERE r.id = ?
+            `,
+                [id]
+            );
+        }
 
         if (restaurants.length === 0) {
             return res.status(404).json({ error: "Restaurant not found" });
@@ -902,6 +1115,7 @@ export const updateDeliveryPartner = async (req, res) => {
 // Settings - General
 export const getGeneralSettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = await query(
             "SELECT * FROM admin_settings WHERE setting_key LIKE 'general_%'"
         );
@@ -924,6 +1138,7 @@ export const getGeneralSettings = async (req, res) => {
 
 export const updateGeneralSettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
@@ -947,6 +1162,7 @@ export const updateGeneralSettings = async (req, res) => {
 // Settings - Notifications
 export const getNotificationSettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = await query(
             "SELECT * FROM admin_settings WHERE setting_key LIKE 'notification_%'"
         );
@@ -971,6 +1187,7 @@ export const getNotificationSettings = async (req, res) => {
 
 export const updateNotificationSettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
@@ -996,6 +1213,7 @@ export const updateNotificationSettings = async (req, res) => {
 // Settings - Security
 export const getSecuritySettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = await query(
             "SELECT * FROM admin_settings WHERE setting_key LIKE 'security_%'"
         );
@@ -1021,6 +1239,7 @@ export const getSecuritySettings = async (req, res) => {
 
 export const updateSecuritySettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
@@ -1044,6 +1263,7 @@ export const updateSecuritySettings = async (req, res) => {
 // Settings - Restaurant Commission
 export const getRestaurantCommission = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = await query(
             "SELECT * FROM admin_settings WHERE setting_key LIKE 'commission_%'"
         );
@@ -1071,6 +1291,7 @@ export const getRestaurantCommission = async (req, res) => {
 
 export const updateRestaurantCommission = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {
@@ -1094,6 +1315,7 @@ export const updateRestaurantCommission = async (req, res) => {
 // Settings - Delivery
 export const getDeliverySettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = await query(
             "SELECT * FROM admin_settings WHERE setting_key LIKE 'delivery_%'"
         );
@@ -1128,6 +1350,7 @@ export const getDeliverySettings = async (req, res) => {
 
 export const updateDeliverySettings = async (req, res) => {
     try {
+        await ensureAdminSettingsTable();
         const settings = req.body;
 
         for (const [key, value] of Object.entries(settings)) {

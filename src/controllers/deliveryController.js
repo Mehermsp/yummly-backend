@@ -5,7 +5,6 @@ import {
     claimReadyOrderAssignment,
     clearOrderDeliveryPartner,
     confirmOrderPaymentByDeliveryPartner,
-    getDeliveryOpenOrders,
     getAssignmentForOrderAndPartner,
     getDeliveryPartnerStats,
     getOrderById,
@@ -49,7 +48,6 @@ const isAcceptanceWindowOpen = (assignedAt) => {
 };
 
 export const getDeliveryDashboard = asyncHandler(async (req, res) => {
-    const openOrders = await getDeliveryOpenOrders(req.user.id);
     const assignments = await listDeliveryAssignments(req.user.id);
     const assignmentsWithItems = await Promise.all(
         assignments.map(async (assignment) => {
@@ -63,7 +61,7 @@ export const getDeliveryDashboard = asyncHandler(async (req, res) => {
         res,
         {
             profile: req.user,
-            openOrders,
+            openOrders: [],
             assignments: assignmentsWithItems,
             stats,
         },
