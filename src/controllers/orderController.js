@@ -1,5 +1,5 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
-const { getCache, setCache } = require("../utils/redisCache");
+import { getCache, setCache } from "../utils/redisCache.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 import { sendEmail } from "../utils/email.js";
 import {
