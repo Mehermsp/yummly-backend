@@ -1,4 +1,5 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { getCache, setCache } from "../utils/redisCache";
 import { AppError, sendSuccess } from "../utils/http.js";
 import { sendEmail } from "../utils/email.js";
 import {
@@ -113,7 +114,19 @@ export const getMyOrders = asyncHandler(async (req, res) => {
 });
 
 export const getOrderDetails = asyncHandler(async (req, res) => {
-    const order = await getOrderById(req.params.orderId);
+    const orderId = req.params.orderId;
+    const cacheKey = `order:${orderId}`;
+    let order = await getCache(cacheKey);
+
+    if (!order) {
+        // Cache miss or Redis error, fallback to MySQL
+        order = await getOrderById(orderId);
+        if (order) {
+            // Set cache for future requests
+            setCache(cacheKey, order, 300); // 5 min TTL
+        }
+    }
+
     if (!order) {
         throw new AppError(404, "Order not found");
     }

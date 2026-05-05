@@ -5,6 +5,7 @@ import compression from "compression";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import apiRoutes from "./routes/index.js";
+import cacheMiddleware from "./utils/cacheMiddleware.js";
 
 export function createApp() {
     const app = express();
@@ -22,7 +23,22 @@ export function createApp() {
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-    // API Routes
+    // Redis cache for all GET API requests (except auth/login/register)
+    app.use("/api", (req, res, next) => {
+        // Only cache GET requests, skip auth endpoints
+        if (
+            req.method === "GET" &&
+            !/^\/auth\/(login|register)/.test(req.path)
+        ) {
+            // Cache key: user-specific if logged in, else by URL
+            const userId = req.user?.id || req.session?.userId || "anon";
+            return cacheMiddleware(
+                () => `api:${userId}:${req.originalUrl}`,
+                120
+            )(req, res, next);
+        }
+        next();
+    });
     app.use("/api", apiRoutes);
 
     // Health check endpoint
