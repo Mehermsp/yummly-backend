@@ -74,6 +74,10 @@ export const env = {
         process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY || "",
     emailFrom: process.env.EMAIL_FROM || "",
     emailFromName: process.env.EMAIL_FROM_NAME || "TastieKit",
+
+    // Redis/cache controls (disabled by default to avoid stale user-specific data)
+    redisEnabled: parseBoolean(process.env.REDIS_ENABLED, false),
+    redisUrl: process.env.REDIS_URL || "",
 };
 
 // Final safety check for JWT Secret
