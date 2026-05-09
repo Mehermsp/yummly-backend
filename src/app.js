@@ -23,22 +23,25 @@ export function createApp() {
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-    // Redis cache for all GET API requests (except auth/login/register)
-    app.use("/api", (req, res, next) => {
-        // Only cache GET requests, skip auth endpoints
-        if (
-            req.method === "GET" &&
-            !/^\/auth\/(login|register)/.test(req.path)
-        ) {
-            // Cache key: user-specific if logged in, else by URL
-            const userId = req.user?.id || req.session?.userId || "anon";
-            return cacheMiddleware(
-                () => `api:${userId}:${req.originalUrl}`,
-                120
-            )(req, res, next);
-        }
-        next();
-    });
+    // Redis cache is opt-in. Keep user/cart flows uncached to avoid stale data.
+    if (env.redisEnabled) {
+        app.use("/api", (req, res, next) => {
+            const isGet = req.method === "GET";
+            const isAuthRoute = req.path.startsWith("/auth");
+            const isCartRoute = req.path.startsWith("/cart");
+            const hasAuthHeader = Boolean(req.headers.authorization);
+
+            if (isGet && !isAuthRoute && !isCartRoute && !hasAuthHeader) {
+                return cacheMiddleware(() => `api:public:${req.originalUrl}`, 120)(
+                    req,
+                    res,
+                    next
+                );
+            }
+
+            next();
+        });
+    }
     app.use("/api", apiRoutes);
 
     // Health check endpoint
