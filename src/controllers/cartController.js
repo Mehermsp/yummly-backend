@@ -70,11 +70,7 @@ export const addCartItem = asyncHandler(async (req, res) => {
     });
 
     const items = await getCartForUser(req.user.id);
-    sendSuccess(
-        res,
-        buildCartResponse(items),
-        "Cart updated successfully"
-    );
+    sendSuccess(res, buildCartResponse(items), "Cart updated successfully");
 });
 
 export const updateCartItem = asyncHandler(async (req, res) => {
@@ -83,8 +79,18 @@ export const updateCartItem = asyncHandler(async (req, res) => {
         throw new AppError(400, "quantity is required");
     }
 
-    const existing = await getCartItemById(req.user.id, req.params.cartItemId);
+    const cartItemId = Number(req.params.cartItemId);
+    if (!Number.isFinite(cartItemId) || cartItemId <= 0) {
+        throw new AppError(400, "cartItemId is invalid");
+    }
+
+    const existing = await getCartItemById(req.user.id, cartItemId);
     if (!existing) {
+        // Helps client debug (usually wrong/stale cartId or different user)
+        console.warn("CART_ITEM_NOT_FOUND", {
+            userId: req.user.id,
+            cartItemId,
+        });
         throw new AppError(404, "Cart item not found");
     }
 
