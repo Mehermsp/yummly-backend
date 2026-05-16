@@ -75,6 +75,13 @@ export const env = {
     emailFrom: process.env.EMAIL_FROM || "",
     emailFromName: process.env.EMAIL_FROM_NAME || "TastieKit",
 
+    // Razorpay
+    razorpayKeyId: String(process.env.RAZORPAY_KEY_ID || "").trim(),
+    razorpayKeySecret: String(process.env.RAZORPAY_KEY_SECRET || "").trim(),
+    razorpayCurrency: String(process.env.RAZORPAY_CURRENCY || "INR")
+        .trim()
+        .toUpperCase(),
+
     // Redis/cache controls (disabled by default to avoid stale user-specific data)
     redisEnabled: parseBoolean(process.env.REDIS_ENABLED, false),
     redisUrl: process.env.REDIS_URL || "",

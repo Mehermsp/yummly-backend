@@ -79,6 +79,42 @@ const summarizeCart = (cartItems) => {
     };
 };
 
+export const getCustomerCheckoutSummary = async (customerId) => {
+    const cartItems = await query(
+        `
+        SELECT
+            c.menu_id AS menu_item_id,
+            c.qty AS quantity,
+            c.price AS unit_price,
+            c.name,
+            mi.restaurant_id,
+            COALESCE(mi.discount, 0) AS discount,
+            COALESCE(mi.preparation_time_mins, 20) AS preparation_time_mins,
+            COALESCE(mi.is_available, 1) AS is_available,
+            r.is_active,
+            r.is_open
+        FROM carts c
+        INNER JOIN menu_items mi ON mi.id = c.menu_id
+        INNER JOIN restaurants r ON r.id = mi.restaurant_id
+        WHERE c.user_id = ?
+        ORDER BY c.id ASC
+        `,
+        [customerId]
+    );
+
+    if (!cartItems.length) {
+        throw new Error("Cart is empty");
+    }
+
+    if (
+        cartItems.some((item) => !item.is_available || !item.is_active || !item.is_open)
+    ) {
+        throw new Error("One or more items are unavailable");
+    }
+
+    return summarizeCart(cartItems);
+};
+
 // ====================== CUSTOMER ======================
 export const listCustomerOrders = async (customerId, status) =>
     query(
@@ -104,6 +140,18 @@ export const listCustomerOrders = async (customerId, status) =>
 
 export const getOrderById = async (orderId) =>
     getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId]);
+
+export const findOrderByPaymentReference = async (paymentReference) => {
+    try {
+        return await getOne(
+            `SELECT id, order_number FROM orders WHERE payment_reference = ? LIMIT 1`,
+            [paymentReference]
+        );
+    } catch {
+        // Compatibility with schemas that do not yet have `payment_reference`.
+        return null;
+    }
+};
 
 const enrichOrderItemsWithImages = async (items) => {
     if (!items?.length) return [];
@@ -201,6 +249,8 @@ export const createOrder = async ({
     addressId,
     paymentMethod,
     customerNotes,
+    paymentStatus = "pending",
+    paymentReference = null,
 }) =>
     withTransaction(async (connection) => {
         const [cartItems] = await connection.execute(
@@ -259,37 +309,76 @@ export const createOrder = async ({
             Date.now() + estimatedDeliveryMinutes * 60 * 1000
         );
 
-        // INSERT ORDER: Match column count to value count (20 columns total)
-        const [orderResult] = await connection.execute(
-            `
-            INSERT INTO orders (
-                order_number, user_id, restaurant_id, address_id, status,
-                subtotal, discount_amount, delivery_fee, tax_amount, total,
-                payment_method, payment_status, estimated_delivery_time, notes,
-                door_no, street, area, city, state, zip_code
-            ) VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [
-                orderNumber,
-                customerId,
-                restaurantId,
-                addressId,
-                subtotal,
-                itemDiscount,
-                deliveryFee,
-                taxAmount,
-                total,
-                paymentMethod || "cash",
-                estimatedDeliveryTime,
-                customerNotes || null,
-                address.door_no,
-                address.street,
-                address.area,
-                address.city,
-                address.state,
-                address.pincode,
-            ]
-        );
+        let orderResult;
+
+        try {
+            [orderResult] = await connection.execute(
+                `
+                INSERT INTO orders (
+                    order_number, user_id, restaurant_id, address_id, status,
+                    subtotal, discount_amount, delivery_fee, tax_amount, total,
+                    payment_method, payment_status, payment_reference,
+                    estimated_delivery_time, notes, door_no, street, area, city,
+                    state, zip_code
+                ) VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                [
+                    orderNumber,
+                    customerId,
+                    restaurantId,
+                    addressId,
+                    subtotal,
+                    itemDiscount,
+                    deliveryFee,
+                    taxAmount,
+                    total,
+                    paymentMethod || "cash",
+                    paymentStatus || "pending",
+                    paymentReference || null,
+                    estimatedDeliveryTime,
+                    customerNotes || null,
+                    address.door_no,
+                    address.street,
+                    address.area,
+                    address.city,
+                    address.state,
+                    address.pincode,
+                ]
+            );
+        } catch {
+            // Compatibility fallback for deployments that do not have `payment_reference`.
+            [orderResult] = await connection.execute(
+                `
+                INSERT INTO orders (
+                    order_number, user_id, restaurant_id, address_id, status,
+                    subtotal, discount_amount, delivery_fee, tax_amount, total,
+                    payment_method, payment_status, estimated_delivery_time, notes,
+                    door_no, street, area, city, state, zip_code
+                ) VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                [
+                    orderNumber,
+                    customerId,
+                    restaurantId,
+                    addressId,
+                    subtotal,
+                    itemDiscount,
+                    deliveryFee,
+                    taxAmount,
+                    total,
+                    paymentMethod || "cash",
+                    paymentStatus || "pending",
+                    estimatedDeliveryTime,
+                    customerNotes || null,
+                    address.door_no,
+                    address.street,
+                    address.area,
+                    address.city,
+                    address.state,
+                    address.pincode,
+                ]
+            );
+        }
 
         const orderId = orderResult.insertId;
 
