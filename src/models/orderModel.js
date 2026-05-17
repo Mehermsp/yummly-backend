@@ -107,7 +107,9 @@ export const getCustomerCheckoutSummary = async (customerId) => {
     }
 
     if (
-        cartItems.some((item) => !item.is_available || !item.is_active || !item.is_open)
+        cartItems.some(
+            (item) => !item.is_available || !item.is_active || !item.is_open
+        )
     ) {
         throw new Error("One or more items are unavailable");
     }
@@ -148,7 +150,6 @@ export const findOrderByPaymentReference = async (paymentReference) => {
             [paymentReference]
         );
     } catch {
-        // Compatibility with schemas that do not yet have `payment_reference`.
         return null;
     }
 };
@@ -310,7 +311,6 @@ export const createOrder = async ({
         );
 
         let orderResult;
-
         try {
             [orderResult] = await connection.execute(
                 `
@@ -332,7 +332,7 @@ export const createOrder = async ({
                     deliveryFee,
                     taxAmount,
                     total,
-                    paymentMethod || "cash",
+                    paymentMethod || "upi",
                     paymentStatus || "pending",
                     paymentReference || null,
                     estimatedDeliveryTime,
@@ -346,7 +346,6 @@ export const createOrder = async ({
                 ]
             );
         } catch {
-            // Compatibility fallback for deployments that do not have `payment_reference`.
             [orderResult] = await connection.execute(
                 `
                 INSERT INTO orders (
@@ -366,7 +365,7 @@ export const createOrder = async ({
                     deliveryFee,
                     taxAmount,
                     total,
-                    paymentMethod || "cash",
+                    paymentMethod || "upi",
                     paymentStatus || "pending",
                     estimatedDeliveryTime,
                     customerNotes || null,

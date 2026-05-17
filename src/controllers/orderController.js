@@ -3,7 +3,6 @@ import { getCache, setCache } from "../utils/redisCache.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 import { sendEmail } from "../utils/email.js";
 import {
-    createOrder,
     getOrderById,
     getOrderItems,
     getOrderStatusLogs,
@@ -11,7 +10,6 @@ import {
     updateOrderStatus,
     cancelOrder as cancelOrderModel,
 } from "../models/orderModel.js";
-import { getAddressById } from "../models/customerModel.js";
 import { ORDER_STATUS, ROLES } from "../constants/index.js";
 import {
     getRestaurantByOwnerId,
@@ -68,44 +66,10 @@ const validateRestaurantStatusTransition = (currentStatus, nextStatus) => {
 };
 
 export const placeOrder = asyncHandler(async (req, res) => {
-    const { addressId, paymentMethod, customerNotes } = req.body;
-    const address = await getAddressById(req.user.id, addressId);
-    if (!address) {
-        throw new AppError(400, "Valid delivery address is required");
-    }
-
-    let orderId;
-    try {
-        orderId = await createOrder({
-            customerId: req.user.id,
-            addressId,
-            paymentMethod,
-            customerNotes,
-        });
-    } catch (error) {
-        throw new AppError(400, error.message);
-    }
-
-    const order = await getOrderById(orderId);
-    const items = await getOrderItems(orderId);
-
-    // Non-blocking transactional emails.
-    void sendEmail({
-        to: order?.customer_email,
-        subject: `Order placed: ${order?.order_number || orderId}`,
-        text: `Your order ${
-            order?.order_number || orderId
-        } has been placed successfully.`,
-    });
-    void sendEmail({
-        to: order?.restaurant_email,
-        subject: `New order received: ${order?.order_number || orderId}`,
-        text: `A new order ${
-            order?.order_number || orderId
-        } was placed and is awaiting action.`,
-    });
-
-    sendSuccess(res, { ...order, items }, "Order placed successfully", 201);
+    throw new AppError(
+        400,
+        "Direct order placement is disabled. Complete online payment first."
+    );
 });
 
 export const getMyOrders = asyncHandler(async (req, res) => {
