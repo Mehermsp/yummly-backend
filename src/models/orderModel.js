@@ -154,6 +154,116 @@ export const findOrderByPaymentReference = async (paymentReference) => {
     }
 };
 
+export const findOrderByPaymentId = async (paymentId) =>
+    getOne(
+        `SELECT id, order_number FROM orders WHERE payment_id = ? LIMIT 1`,
+        [paymentId]
+    );
+
+export const updateOrderPaymentSnapshot = async ({
+    orderId,
+    paymentId,
+    paymentStatus = "completed",
+    paymentMethod = "upi",
+    paymentProvider = "mock_gateway",
+    paymentInstrumentType = null,
+    paymentInstrumentLabel = null,
+}) => {
+    try {
+        await query(
+            `
+            UPDATE orders
+            SET payment_id = ?,
+                payment_status = ?,
+                payment_method = ?,
+                payment_provider = ?,
+                payment_instrument_type = ?,
+                payment_instrument_label = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            `,
+            [
+                paymentId,
+                paymentStatus,
+                paymentMethod,
+                paymentProvider,
+                paymentInstrumentType,
+                paymentInstrumentLabel,
+                orderId,
+            ]
+        );
+    } catch {
+        // Compatibility fallback for deployments that don't have new payment snapshot columns.
+        await query(
+            `
+            UPDATE orders
+            SET payment_id = ?,
+                payment_status = ?,
+                payment_method = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            `,
+            [paymentId, paymentStatus, paymentMethod, orderId]
+        );
+    }
+};
+
+export const saveOrderPaymentRecord = async ({
+    orderId,
+    customerId,
+    amount,
+    currency = "INR",
+    paymentMethod,
+    paymentStatus = "captured",
+    provider = "mock_gateway",
+    transactionId,
+    upiId = null,
+    cardNetwork = null,
+    cardLast4 = null,
+    cardHolderName = null,
+    cardExpiryMonth = null,
+    cardExpiryYear = null,
+    gatewayPayload = null,
+}) =>
+    query(
+        `
+        INSERT INTO order_payments (
+            order_id,
+            customer_id,
+            amount,
+            currency,
+            payment_method,
+            payment_status,
+            provider,
+            transaction_id,
+            upi_id,
+            card_network,
+            card_last4,
+            card_holder_name,
+            card_expiry_month,
+            card_expiry_year,
+            gateway_payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+            orderId,
+            customerId,
+            amount,
+            currency,
+            paymentMethod,
+            paymentStatus,
+            provider,
+            transactionId,
+            upiId,
+            cardNetwork,
+            cardLast4,
+            cardHolderName,
+            cardExpiryMonth,
+            cardExpiryYear,
+            gatewayPayload ? JSON.stringify(gatewayPayload) : null,
+        ]
+    );
+
 const enrichOrderItemsWithImages = async (items) => {
     if (!items?.length) return [];
 
