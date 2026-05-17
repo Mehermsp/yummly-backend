@@ -12,7 +12,7 @@ import { sendEmail } from "../utils/email.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 
-const ALLOWED_METHODS = new Set(["upi", "card"]);
+const ALLOWED_METHODS = new Set(["upi", "card", "cash"]);
 const UPI_ID_REGEX = /^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$/;
 
 const getMockPaymentMethods = () => [
@@ -26,14 +26,24 @@ const getMockPaymentMethods = () => [
         title: "Card",
         fields: ["cardHolderName", "cardNumber", "expiryMonth", "expiryYear", "cvv"],
     },
+    {
+        method: "cash",
+        title: "Cash on Delivery",
+        fields: [],
+    },
 ];
 
 const normalizeMethod = (value) => {
-    const method = String(value || "")
+    const rawMethod = String(value || "")
         .trim()
         .toLowerCase();
+    const aliases = {
+        cash_on_delivery: "cash",
+        cod: "cash",
+    };
+    const method = aliases[rawMethod] || rawMethod;
     if (!ALLOWED_METHODS.has(method)) {
-        throw new AppError(400, "paymentMethod must be either 'upi' or 'card'");
+        throw new AppError(400, "paymentMethod must be one of 'upi', 'card', or 'cash'");
     }
     return method;
 };
@@ -106,6 +116,22 @@ const validateCardExpiry = (month, year) => {
 
 const validatePaymentData = (method, paymentData) => {
     const payload = paymentData || {};
+    if (method === "cash") {
+        return {
+            upiId: null,
+            paymentInstrumentType: "cash",
+            paymentInstrumentLabel: "Cash on Delivery",
+            persisted: {
+                upiId: null,
+                cardNetwork: null,
+                cardLast4: null,
+                cardHolderName: null,
+                cardExpiryMonth: null,
+                cardExpiryYear: null,
+            },
+        };
+    }
+
     if (method === "upi") {
         const upiId = normalizeUpiId(payload.upiId);
         if (!UPI_ID_REGEX.test(upiId)) {
@@ -193,6 +219,10 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
     const method = normalizeMethod(paymentMethod);
     const normalized = validatePaymentData(method, paymentData);
     const transactionId = buildMockTransactionId(method);
+    const isCashOnDelivery = method === "cash";
+    const paymentStatus = isCashOnDelivery ? "pending" : "completed";
+    const paymentRecordStatus = isCashOnDelivery ? "pending" : "captured";
+    const paymentProvider = isCashOnDelivery ? "cash_on_delivery" : "mock_gateway";
 
     const duplicate = await findOrderByPaymentId(transactionId);
     if (duplicate?.id) {
@@ -213,7 +243,7 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
             addressId,
             paymentMethod: method,
             customerNotes,
-            paymentStatus: "completed",
+            paymentStatus,
             paymentReference: transactionId,
         });
     } catch (error) {
@@ -224,9 +254,9 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
         await updateOrderPaymentSnapshot({
             orderId,
             paymentId: transactionId,
-            paymentStatus: "completed",
+            paymentStatus,
             paymentMethod: method,
-            paymentProvider: "mock_gateway",
+            paymentProvider,
             paymentInstrumentType: normalized.paymentInstrumentType,
             paymentInstrumentLabel: normalized.paymentInstrumentLabel,
         });
@@ -237,8 +267,8 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
             amount: checkoutSummary.total,
             currency: "INR",
             paymentMethod: method,
-            paymentStatus: "captured",
-            provider: "mock_gateway",
+            paymentStatus: paymentRecordStatus,
+            provider: paymentProvider,
             transactionId,
             upiId: normalized.persisted.upiId,
             cardNetwork: normalized.persisted.cardNetwork,
@@ -247,10 +277,13 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
             cardExpiryMonth: normalized.persisted.cardExpiryMonth,
             cardExpiryYear: normalized.persisted.cardExpiryYear,
             gatewayPayload: {
-                simulated: true,
-                approvalCode: `APR${Math.floor(100000 + Math.random() * 900000)}`,
+                simulated: !isCashOnDelivery,
+                approvalCode: isCashOnDelivery
+                    ? null
+                    : `APR${Math.floor(100000 + Math.random() * 900000)}`,
                 method,
                 customerId: req.user.id,
+                collectAtDoorstep: isCashOnDelivery,
             },
         });
     } catch (error) {
@@ -284,16 +317,18 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(async (req, res) =>
             ...order,
             items,
             payment: {
-                provider: "mock_gateway",
+                provider: paymentProvider,
                 transactionId,
                 method,
-                status: "captured",
+                status: paymentRecordStatus,
                 upiId: normalized.persisted.upiId,
                 cardLast4: normalized.persisted.cardLast4,
                 cardNetwork: normalized.persisted.cardNetwork,
             },
         },
-        "Mock payment successful and order placed",
+        isCashOnDelivery
+            ? "Order placed with Cash on Delivery"
+            : "Mock payment successful and order placed",
         201
     );
 });
