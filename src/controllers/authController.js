@@ -23,6 +23,7 @@ import { buildOtpExpiry, exposeDevOtp, generateOtp } from "../utils/otp.js";
 import { AppError, sendSuccess } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
 import { sanitizeUser } from "../utils/sanitizeUser.js";
+import { sendEmail } from "../utils/email.js";
 
 const issueTokens = async (user) => {
     const payload = {
@@ -84,7 +85,20 @@ export const register = asyncHandler(async (req, res) => {
         type: "register",
         expiresAt: buildOtpExpiry(),
     });
-
+    
+await sendEmail({
+    to: user.email,
+    subject: "TastieKit OTP Verification",
+    text: `Your TastieKit OTP is ${otpCode}. It expires in ${env.otpTtlMinutes} minutes.`,
+    html: `
+        <div style="font-family: Arial, sans-serif;">
+            <h2>OTP Verification</h2>
+            <p>Your OTP is:</p>
+            <h1>${otpCode}</h1>
+            <p>This OTP expires in ${env.otpTtlMinutes} minutes.</p>
+        </div>
+    `,
+});
     const user = await getUserById(userId);
 
     sendSuccess(
@@ -239,7 +253,19 @@ export const requestOtp = asyncHandler(async (req, res) => {
         type,
         expiresAt: buildOtpExpiry(),
     });
-
+await sendEmail({
+    to: user.email,
+    subject: "TastieKit OTP Verification",
+    text: `Your TastieKit OTP is ${otpCode}. It expires in ${env.otpTtlMinutes} minutes.`,
+    html: `
+        <div style="font-family: Arial, sans-serif;">
+            <h2>OTP Verification</h2>
+            <p>Your OTP is:</p>
+            <h1>${otpCode}</h1>
+            <p>This OTP expires in ${env.otpTtlMinutes} minutes.</p>
+        </div>
+    `,
+});
     sendSuccess(
         res,
         {
@@ -273,7 +299,19 @@ export const requestPasswordReset = asyncHandler(async (req, res) => {
         type: "password_reset",
         expiresAt: buildOtpExpiry(),
     });
-
+await sendEmail({
+    to: user.email,
+    subject: "TastieKit Password Reset OTP",
+    text: `Your TastieKit password reset OTP is ${otpCode}. It expires in ${env.otpTtlMinutes} minutes.`,
+    html: `
+        <div style="font-family: Arial, sans-serif;">
+            <h2>Password Reset Request</h2>
+            <p>Your OTP is:</p>
+            <h1>${otpCode}</h1>
+            <p>This OTP expires in ${env.otpTtlMinutes} minutes.</p>
+        </div>
+    `,
+});
     sendSuccess(
         res,
         {
