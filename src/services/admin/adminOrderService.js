@@ -1,4 +1,4 @@
-import { query, withTransaction } from "../config/db.js";
+import { query, withTransaction } from "../../config/db.js";
 
 export const getOrders = async (filters = {}) => {
     const { status, limit } = filters;
