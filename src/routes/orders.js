@@ -15,13 +15,13 @@ import {
     getMyOrders,
     getOrderDetails,
     cancelOrder,
-} from "../controllers/order/customerOrderController.js";
+} from "../controllers/orders/customerOrderController.js";
 
 // ==============================
 // TRACKING
 // ==============================
 
-import { getOrderTracking } from "../controllers/order/orderTrackingController.js";
+import { getOrderTracking } from "../controllers/orders/orderTrackingController.js";
 
 // ==============================
 // RESTAURANT
@@ -30,7 +30,7 @@ import { getOrderTracking } from "../controllers/order/orderTrackingController.j
 import {
     getRestaurantOrders,
     updateRestaurantOrderStatus,
-} from "../controllers/order/restaurantOrderController.js";
+} from "../controllers/orders/restaurantOrderController.js";
 
 // ==============================
 // DELIVERY
@@ -43,7 +43,7 @@ import {
     rejectOrder,
     pickupOrder,
     deliverOrder,
-} from "../controllers/order/deliveryOrderController.js";
+} from "../controllers/orders/deliveryOrderController.js";
 
 const router = Router();
 
