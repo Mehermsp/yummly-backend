@@ -1,4 +1,4 @@
-import { query } from "../config/db.js";
+import { query } from "../../config/db.js";
 import * as adminService from "../../services/adminService.js";
 
 // Get Orders
