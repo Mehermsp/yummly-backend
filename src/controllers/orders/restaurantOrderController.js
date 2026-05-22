@@ -2,7 +2,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 
 import { sendSuccess } from "../../utils/http.js";
 
-import * as restaurantOrderService from "../../services/order/restaurantOrderService.js";
+import * as restaurantOrderService from "../../services/orders/restaurantOrderService.js";
 
 export const getRestaurantOrders = asyncHandler(async (req, res) => {
     const orders = await restaurantOrderService.getRestaurantOrders({

@@ -2,7 +2,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 
 import { AppError, sendSuccess } from "../../utils/http.js";
 
-import * as customerOrderService from "../../services/order/customerOrderService.js";
+import * as customerOrderService from "../../services/orders/customerOrderService.js";
 
 export const placeOrder = asyncHandler(async (req, res) => {
     throw new AppError(
