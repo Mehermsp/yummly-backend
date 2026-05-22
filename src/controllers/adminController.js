@@ -910,10 +910,7 @@ export const assignDeliveryPartner = async (req, res) => {
                 );
             }
 
-            await connection.execute(
-                "UPDATE users SET is_available = 0 WHERE id = ? AND role = 'delivery_partner'",
-                [delivery_partner_id]
-            );
+           
 
             if (
                 order.delivery_partner_id &&

@@ -40,7 +40,9 @@ export const approveRestaurantApplication = async ({
         );
 
         if (!applications.length) {
-            throw new Error("Restaurant application not found or already reviewed");
+            throw new Error(
+                "Restaurant application not found or already reviewed"
+            );
         }
 
         const application = applications[0];
