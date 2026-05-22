@@ -1,10 +1,10 @@
 import { query } from "../../config/db.js";
-import * as adminService from "../../services/adminService.js";
+import * as adminOrderService from "../../services/admin/adminOrderService.js";
 
 // Get Orders
 export const getOrders = async (req, res) => {
     try {
-        const orders = await adminService.getOrders(req.query);
+        const orders = await adminOrderService.getOrders(req.query);
 
         res.json(orders);
     } catch (error) {
@@ -19,7 +19,7 @@ export const getOrders = async (req, res) => {
 // Get Order by ID
 export const getOrderById = async (req, res) => {
     try {
-        const order = await adminService.getOrderById(req.params.id);
+        const order = await adminOrderService.getOrderById(req.params.id);
 
         if (!order) {
             return res.status(404).json({
@@ -47,7 +47,7 @@ export const updateOrderStatus = async (req, res) => {
 // Assign Delivery Partner to Order
 export const assignDeliveryPartner = async (req, res) => {
     try {
-        const result = await adminService.assignDeliveryPartner({
+        const result = await adminOrderService.assignDeliveryPartner({
             orderId: req.params.id,
             deliveryPartnerId: req.body.delivery_partner_id,
             adminId: req.user.id,
@@ -66,7 +66,7 @@ export const assignDeliveryPartner = async (req, res) => {
 // Get Ready for Pickup Orders
 export const getReadyForPickupOrders = async (req, res) => {
     try {
-        const orders = await adminService.getReadyForPickupOrders();
+        const orders = await adminOrderService.getReadyForPickupOrders();
 
         res.json(orders);
     } catch (error) {
