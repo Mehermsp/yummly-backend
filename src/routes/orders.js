@@ -1,39 +1,128 @@
 import { Router } from "express";
+
 import { authenticate } from "../middleware/authenticate.js";
+
 import { authorize } from "../middleware/authorize.js";
+
 import { ROLES } from "../constants/index.js";
+
+// ==============================
+// CUSTOMER
+// ==============================
+
 import {
-    cancelOrder,
+    placeOrder,
     getMyOrders,
     getOrderDetails,
-    getOrderTracking,
+    cancelOrder,
+} from "../controllers/order/customerOrderController.js";
+
+// ==============================
+// TRACKING
+// ==============================
+
+import { getOrderTracking } from "../controllers/order/orderTrackingController.js";
+
+// ==============================
+// RESTAURANT
+// ==============================
+
+import {
     getRestaurantOrders,
-    placeOrder,
     updateRestaurantOrderStatus,
-} from "../controllers/orderController.js";
+} from "../controllers/order/restaurantOrderController.js";
+
+// ==============================
+// DELIVERY
+// ==============================
+
+import {
+    getDeliveryAssignments,
+    getOpenOrders,
+    acceptOrder,
+    rejectOrder,
+    pickupOrder,
+    deliverOrder,
+} from "../controllers/order/deliveryOrderController.js";
 
 const router = Router();
 
 router.use(authenticate);
+
+// =====================================================
+// CUSTOMER ROUTES
+// =====================================================
+
 router.post("/", authorize(ROLES.CUSTOMER), placeOrder);
+
 router.get("/my", authorize(ROLES.CUSTOMER), getMyOrders);
+
 router.get("/:orderId/tracking", authorize(ROLES.CUSTOMER), getOrderTracking);
+
 router.post("/:orderId/cancel", authorize(ROLES.CUSTOMER), cancelOrder);
+
+// =====================================================
+// RESTAURANT ROUTES
+// =====================================================
+
 router.get(
     "/restaurant/list",
     authorize(ROLES.RESTAURANT_PARTNER),
     getRestaurantOrders
 );
+
 router.patch(
     "/restaurant/:orderId/status",
     authorize(ROLES.RESTAURANT_PARTNER),
     updateRestaurantOrderStatus
 );
+
 router.put(
     "/restaurant/:orderId/status",
     authorize(ROLES.RESTAURANT_PARTNER),
     updateRestaurantOrderStatus
 );
+
+// =====================================================
+// DELIVERY ROUTES
+// =====================================================
+
+router.get("/delivery/open", authorize(ROLES.DELIVERY_PARTNER), getOpenOrders);
+
+router.get(
+    "/delivery/assignments",
+    authorize(ROLES.DELIVERY_PARTNER),
+    getDeliveryAssignments
+);
+
+router.post(
+    "/delivery/:orderId/accept",
+    authorize(ROLES.DELIVERY_PARTNER),
+    acceptOrder
+);
+
+router.post(
+    "/delivery/:orderId/reject",
+    authorize(ROLES.DELIVERY_PARTNER),
+    rejectOrder
+);
+
+router.post(
+    "/delivery/:orderId/pickup",
+    authorize(ROLES.DELIVERY_PARTNER),
+    pickupOrder
+);
+
+router.post(
+    "/delivery/:orderId/deliver",
+    authorize(ROLES.DELIVERY_PARTNER),
+    deliverOrder
+);
+
+// =====================================================
+// COMMON ORDER DETAILS
+// =====================================================
+
 router.get(
     "/:orderId",
     authorize(

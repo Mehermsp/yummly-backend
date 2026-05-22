@@ -46,31 +46,13 @@ export const approveRestaurantApplication = async ({
         }
 
         const application = applications[0];
+
         const [restaurantResult] = await connection.execute(
             `
             INSERT INTO restaurants (
-                owner_id,
-                user_id,
-                name,
-                email,
-                phone,
-                description,
-                address,
-                city,
-                state,
-                pincode,
-                landmark,
-                cuisines,
-                open_time,
-                close_time,
-                days_open,
-                fssai,
-                gst,
-                pan,
-                logo,
-                cover_image,
-                is_active,
-                is_open
+                owner_id, user_id, name, email, phone, description, address,
+                city, state, pincode, landmark, cuisines, open_time, close_time,
+                days_open, fssai, gst, pan, logo, cover_image, is_active, is_open
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1, 1)
             `,
             [
@@ -95,13 +77,9 @@ export const approveRestaurantApplication = async ({
             ]
         );
 
-        // Keep user as restaurant partner after approval.
+        // Update user role to restaurant partner
         await connection.execute(
-            `
-            UPDATE users
-            SET role = 'restaurant_partner'
-            WHERE id = ?
-            `,
+            `UPDATE users SET role = 'restaurant_partner' WHERE id = ?`,
             [application.owner_id]
         );
 
@@ -120,11 +98,7 @@ export const approveRestaurantApplication = async ({
         await connection.execute(
             `
             INSERT INTO admin_activity_log (
-                admin_id,
-                action,
-                entity_type,
-                entity_id,
-                details
+                admin_id, action, entity_type, entity_id, details
             ) VALUES (?, 'approve_restaurant_application', 'restaurant_application', ?, ?)
             `,
             [
@@ -157,9 +131,7 @@ export const rejectRestaurantApplication = async ({
 export const listAdminActivityLogs = async () =>
     query(
         `
-        SELECT
-            l.*,
-            u.name AS admin_name
+        SELECT l.*, u.name AS admin_name
         FROM admin_activity_log l
         INNER JOIN users u ON u.id = l.admin_id
         ORDER BY l.created_at DESC
