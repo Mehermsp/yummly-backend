@@ -155,10 +155,9 @@ export const findOrderByPaymentReference = async (paymentReference) => {
 };
 
 export const findOrderByPaymentId = async (paymentId) =>
-    getOne(
-        `SELECT id, order_number FROM orders WHERE payment_id = ? LIMIT 1`,
-        [paymentId]
-    );
+    getOne(`SELECT id, order_number FROM orders WHERE payment_id = ? LIMIT 1`, [
+        paymentId,
+    ]);
 
 export const updateOrderPaymentSnapshot = async ({
     orderId,
@@ -651,7 +650,10 @@ export const getDeliveryOpenOrders = async (deliveryPartnerId = null) =>
         [deliveryPartnerId]
     );
 
-export const claimReadyOrderAssignment = async ({ orderId, deliveryPartnerId }) =>
+export const claimReadyOrderAssignment = async ({
+    orderId,
+    deliveryPartnerId,
+}) =>
     withTransaction(async (connection) => {
         const [activeAssignments] = await connection.execute(
             `
@@ -674,21 +676,34 @@ export const claimReadyOrderAssignment = async ({ orderId, deliveryPartnerId }) 
 
         await connection.execute(
             `
-            INSERT INTO delivery_assignments (
-                order_id,
-                delivery_partner_id,
-                status,
-                assigned_at,
-                accepted_at,
-                rejection_reason,
-                rejected_at
-            ) VALUES (?, ?, 'accepted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL)
-            ON DUPLICATE KEY UPDATE
-                status = 'accepted',
-                accepted_at = CURRENT_TIMESTAMP,
-                rejection_reason = NULL,
-                rejected_at = NULL
-            `,
+    INSERT INTO delivery_assignments (
+        order_id,
+        delivery_partner_id,
+        status,
+        assigned_at,
+        accepted_at,
+        rejection_reason,
+        rejected_at,
+        expires_at
+    ) VALUES (
+        ?,
+        ?,
+        'assigned',
+        CURRENT_TIMESTAMP,
+        NULL,
+        NULL,
+        NULL,
+        DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+    )
+    ON DUPLICATE KEY UPDATE
+        delivery_partner_id = VALUES(delivery_partner_id),
+        status = 'assigned',
+        assigned_at = CURRENT_TIMESTAMP,
+        accepted_at = NULL,
+        rejection_reason = NULL,
+        rejected_at = NULL,
+        expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+    `,
             [orderId, deliveryPartnerId]
         );
 
@@ -758,7 +773,9 @@ export const confirmOrderPaymentByDeliveryPartner = async ({
             return { ...result, paymentStatus };
         } catch (error) {
             const message = String(error?.message || "").toLowerCase();
-            if (message.includes("data truncated for column 'payment_status'")) {
+            if (
+                message.includes("data truncated for column 'payment_status'")
+            ) {
                 lastError = error;
                 continue;
             }

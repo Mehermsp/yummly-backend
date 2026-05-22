@@ -87,7 +87,7 @@ export const getOrderDetails = asyncHandler(async (req, res) => {
         order = await getOrderById(orderId);
         if (order) {
             // Set cache for future requests
-            setCache(cacheKey, order, 300); // 5 min TTL
+            await setCache(cacheKey, order, 300); // 5 min TTL
         }
     }
 
