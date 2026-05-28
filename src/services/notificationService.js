@@ -4,6 +4,12 @@ import { getIO } from "../socket.js";
 import { logger } from "../utils/logger.js";
 
 const safeJson = (value) => JSON.stringify(value || {});
+const LEGACY_SAFE_NOTIFICATION_TYPE = "system";
+
+const isNotificationInsertCompatibilityError = (error) =>
+    /Unknown column|doesn't have a default value|data truncated for column 'type'/i.test(
+        error?.message || ""
+    );
 
 const emitToRoom = (room, eventName, payload) => {
     try {
@@ -33,26 +39,57 @@ export const createNotification = async ({
     if (!userId || !title || !message) return null;
 
     let result;
+    let storedType = type;
+    const normalizedData = {
+        ...data,
+        ...(type === LEGACY_SAFE_NOTIFICATION_TYPE
+            ? {}
+            : { notificationType: data?.notificationType || type }),
+    };
     try {
         result = await query(
             `
             INSERT INTO notifications (user_id, title, message, type, data, is_read, created_at)
             VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
             `,
-            [userId, title, message, type, safeJson(data)]
+            [userId, title, message, storedType, safeJson(normalizedData)]
         );
     } catch (error) {
-        if (!/Unknown column|doesn't have a default value/i.test(error?.message || "")) {
+        if (!isNotificationInsertCompatibilityError(error)) {
             throw error;
         }
 
-        result = await query(
-            `
-            INSERT INTO notifications (user_id, title, message, type)
-            VALUES (?, ?, ?, ?)
-            `,
-            [userId, title, message, type]
-        );
+        if (type !== LEGACY_SAFE_NOTIFICATION_TYPE) {
+            storedType = LEGACY_SAFE_NOTIFICATION_TYPE;
+        }
+
+        try {
+            result = await query(
+                `
+                INSERT INTO notifications (user_id, title, message, type, data, is_read, created_at)
+                VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+                `,
+                [
+                    userId,
+                    title,
+                    message,
+                    storedType,
+                    safeJson(normalizedData),
+                ]
+            );
+        } catch (fallbackError) {
+            if (!isNotificationInsertCompatibilityError(fallbackError)) {
+                throw fallbackError;
+            }
+
+            result = await query(
+                `
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (?, ?, ?, ?)
+                `,
+                [userId, title, message, storedType]
+            );
+        }
     }
 
     const notification = {
@@ -61,7 +98,7 @@ export const createNotification = async ({
         title,
         message,
         type,
-        data,
+        data: normalizedData,
         is_read: 0,
         created_at: new Date().toISOString(),
     };
@@ -86,7 +123,7 @@ export const createNotification = async ({
                         title,
                         message,
                         type,
-                        data,
+                        data: normalizedData,
                     }),
                 ]
             );
