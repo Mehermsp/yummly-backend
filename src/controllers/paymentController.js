@@ -6,6 +6,8 @@ import { getMockPaymentMethods } from "../services/payment/paymentGatewayService
 
 import { processMockPaymentAndPlaceOrder } from "../services/payment/paymentOrderService.js";
 
+export { selectPaymentMethod } from "./payment/selectController.js";
+
 export const getMockPaymentConfig = asyncHandler(async (req, res) => {
     sendSuccess(
         res,

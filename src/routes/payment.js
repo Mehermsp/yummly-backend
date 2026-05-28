@@ -14,5 +14,6 @@ router.use(authenticate);
 router.use(authorize(ROLES.CUSTOMER));
 router.get("/mock/config", getMockPaymentConfig);
 router.post("/mock/complete", completeMockPaymentAndPlaceOrder);
+router.post("/select", selectPaymentMethod);
 
 export default router;
