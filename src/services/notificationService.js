@@ -32,13 +32,28 @@ export const createNotification = async ({
 }) => {
     if (!userId || !title || !message) return null;
 
-    const result = await query(
-        `
-        INSERT INTO notifications (user_id, title, message, type, data, is_read, created_at)
-        VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
-        `,
-        [userId, title, message, type, safeJson(data)]
-    );
+    let result;
+    try {
+        result = await query(
+            `
+            INSERT INTO notifications (user_id, title, message, type, data, is_read, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+            `,
+            [userId, title, message, type, safeJson(data)]
+        );
+    } catch (error) {
+        if (!/Unknown column|doesn't have a default value/i.test(error?.message || "")) {
+            throw error;
+        }
+
+        result = await query(
+            `
+            INSERT INTO notifications (user_id, title, message, type)
+            VALUES (?, ?, ?, ?)
+            `,
+            [userId, title, message, type]
+        );
+    }
 
     const notification = {
         id: result.insertId,
@@ -84,9 +99,16 @@ export const createNotification = async ({
     }
 
     emitToRoom(`user:${userId}`, "notification:new", notification);
-    emitToRoom(`user:${userId}`, "notification:unread-count", {
-        unreadCount: await countUnreadNotifications(userId),
-    });
+    try {
+        emitToRoom(`user:${userId}`, "notification:unread-count", {
+            unreadCount: await countUnreadNotifications(userId),
+        });
+    } catch (error) {
+        logger.warn("Notification unread count skipped", {
+            userId,
+            error: error?.message,
+        });
+    }
 
     return notification;
 };

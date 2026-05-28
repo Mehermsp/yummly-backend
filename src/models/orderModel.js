@@ -366,17 +366,66 @@ export const getOrderItems = async (orderId) => {
 };
 
 export const getOrderStatusLogs = async (orderId) => {
-    const logs = await query(
-        `
-        SELECT status, updated_at AS created_at
-        FROM order_status_logs
-        WHERE order_id = ?
-        ORDER BY updated_at ASC
-        `,
-        [orderId]
-    );
+    let logs;
+    try {
+        logs = await query(
+            `
+            SELECT status, updated_at AS created_at
+            FROM order_status_logs
+            WHERE order_id = ?
+            ORDER BY updated_at ASC
+            `,
+            [orderId]
+        );
+    } catch {
+        logs = await query(
+            `
+            SELECT new_status AS status, created_at
+            FROM order_status_logs
+            WHERE order_id = ?
+            ORDER BY created_at ASC
+            `,
+            [orderId]
+        );
+    }
 
     return withProductOrderStatusList(logs);
+};
+
+const insertOrderStatusLog = async ({
+    orderId,
+    currentStatus = null,
+    nextStatus,
+    actorId = null,
+    actorRole = "system",
+    notes = null,
+    connection = null,
+}) => {
+    const executor = connection
+        ? (sql, params) => connection.execute(sql, params)
+        : query;
+
+    try {
+        await executor(
+            `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+            [orderId, nextStatus]
+        );
+    } catch {
+        await executor(
+            `
+            INSERT INTO order_status_logs (
+                order_id,
+                old_status,
+                new_status,
+                changed_by,
+                changed_by_role,
+                notes,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `,
+            [orderId, currentStatus, nextStatus, actorId, actorRole, notes]
+        );
+    }
 };
 
 // ====================== CREATE ORDER (Fixed Columns) ======================
@@ -549,10 +598,14 @@ export const createOrder = async ({
             );
         }
 
-        await connection.execute(
-            `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, 'placed', CURRENT_TIMESTAMP)`,
-            [orderId]
-        );
+        await insertOrderStatusLog({
+            orderId,
+            nextStatus: "placed",
+            actorId: customerId,
+            actorRole: "customer",
+            notes: "Order placed",
+            connection,
+        });
         await connection.execute(
             `
             UPDATE restaurants
@@ -636,10 +689,14 @@ export const updateOrderStatus = async ({
             ]);
         }
     }
-    await query(
-        `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-        [orderId, normalizedNextStatus]
-    );
+    await insertOrderStatusLog({
+        orderId,
+        currentStatus,
+        nextStatus: normalizedNextStatus,
+        actorId,
+        actorRole,
+        notes,
+    });
     await invalidateOrderCache(orderId);
 };
 

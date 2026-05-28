@@ -297,7 +297,10 @@ export const updateRestaurantOperationsByOwnerId = async (
         );
     }
 
-    assign("operations_note", payload.operationsNote ?? payload.operations_note);
+    assign(
+        "operations_note",
+        payload.operationsNote ?? payload.operations_note
+    );
 
     if (!fields.length) return;
 
@@ -436,8 +439,7 @@ export const updateMenuItem = async (restaurantId, itemId, payload) =>
 export const deleteMenuItem = async (restaurantId, itemId) =>
     query(
         `
-        UPDATE menu_items
-        SET is_available = 0
+        DELETE FROM menu_items
         WHERE id = ? AND restaurant_id = ?
         `,
         [itemId, restaurantId]
