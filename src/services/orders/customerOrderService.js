@@ -13,6 +13,7 @@ import {
 import { getRestaurantByOwnerId } from "../../models/restaurantModel.js";
 
 import { ROLES } from "../../constants/index.js";
+import { notifyOrderStakeholders } from "../notificationService.js";
 
 export const getMyOrders = async ({ customerId, status }) => {
     return await listCustomerOrders(customerId, status);
@@ -88,5 +89,19 @@ export const cancelOrder = async ({ orderId, customerId, reason }) => {
         actorId: customerId,
         actorRole: "customer",
         notes: reason || "Cancelled by customer",
+    });
+
+    const updated = await getOrderById(order.id);
+    await notifyOrderStakeholders({
+        order: updated,
+        title: "Order cancelled",
+        message: `Order ${updated?.order_number || updated?.id} was cancelled.`,
+        type: "order_cancelled",
+        data: {
+            previousStatus: order.status,
+            status: "cancelled",
+            reason: reason || "Cancelled by customer",
+            actorRole: "customer",
+        },
     });
 };

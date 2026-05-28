@@ -14,6 +14,7 @@ import {
 import { sendEmail } from "../../utils/email.js";
 
 import { AppError } from "../../utils/http.js";
+import { notifyOrderStakeholders } from "../notificationService.js";
 
 import {
     normalizeMethod,
@@ -168,6 +169,18 @@ export const processMockPaymentAndPlaceOrder = async ({
         text: `A new order ${
             order?.order_number || orderId
         } was placed and is awaiting action.`,
+    });
+
+    await notifyOrderStakeholders({
+        order,
+        title: "New order placed",
+        message: `Order ${order?.order_number || orderId} has been placed.`,
+        type: "order_placed",
+        data: {
+            status: order?.status,
+            paymentStatus,
+            paymentMethod: method,
+        },
     });
 
     return {

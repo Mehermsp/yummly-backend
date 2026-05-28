@@ -39,6 +39,18 @@ export const validateMenuItemForCart = async ({ userId, menuItemId }) => {
         throw new AppError(400, "Menu item is not available");
     }
 
+    if (!menuItem.is_open) {
+        throw new AppError(400, "Restaurant is currently closed");
+    }
+
+    if (!menuItem.delivery_enabled) {
+        throw new AppError(400, "Restaurant is not accepting delivery orders");
+    }
+
+    if (menuItem.is_busy || !menuItem.peak_hour_available) {
+        throw new AppError(400, "Restaurant is temporarily not accepting orders");
+    }
+
     const existingCartRestaurant = await getCartRestaurant(userId);
 
     if (

@@ -10,6 +10,7 @@ import {
 
 import { getRestaurantByOwnerId } from "../../models/restaurantModel.js";
 import { normalizeOrderStatusInput } from "../../utils/orderStatus.js";
+import { notifyOrderStakeholders } from "../notificationService.js";
 
 const validateRestaurantStatusTransition = (currentStatus, nextStatus) => {
     const allowedTransitions = {
@@ -104,6 +105,20 @@ export const updateRestaurantOrderStatus = async ({
         text: `Your order ${
             updated?.order_number || updated?.id
         } is now ${String(normalizedStatus || "").replace(/_/g, " ")}.`,
+    });
+
+    await notifyOrderStakeholders({
+        order: updated,
+        title: "Order status updated",
+        message: `Order ${
+            updated?.order_number || updated?.id
+        } is now ${String(normalizedStatus || "").replace(/_/g, " ")}.`,
+        type: "order_status",
+        data: {
+            previousStatus: currentStatus,
+            status: normalizedStatus,
+            actorRole: "restaurant_partner",
+        },
     });
 
     return updated;

@@ -9,6 +9,39 @@ import {
     getRestaurantMenu,
     updateMenuItem,
 } from "../../models/restaurantModel.js";
+import {
+    emitRealtimeEvent,
+    notifyAdmins,
+} from "../../services/notificationService.js";
+
+const emitMenuUpdated = async (restaurant, menu, eventName, itemId = null) => {
+    const payload = {
+        restaurantId: restaurant.id,
+        itemId,
+        menu,
+    };
+
+    emitRealtimeEvent({
+        room: `restaurant:${restaurant.id}`,
+        eventName,
+        payload,
+    });
+    emitRealtimeEvent({
+        room: "admin:restaurants",
+        eventName,
+        payload,
+    });
+
+    await notifyAdmins({
+        title: "Restaurant menu changed",
+        message: `${restaurant.name} updated its menu.`,
+        type: "restaurant_menu",
+        data: {
+            restaurantId: restaurant.id,
+            itemId,
+        },
+    });
+};
 
 export const getPartnerMenu = asyncHandler(async (req, res) => {
     const restaurant = await getRestaurantByOwnerId(req.user.id);
@@ -35,6 +68,7 @@ export const createPartnerMenuItem = asyncHandler(async (req, res) => {
 
     const itemId = await createMenuItem(restaurant.id, payload);
     const menu = await getRestaurantMenu(restaurant.id);
+    await emitMenuUpdated(restaurant, menu, "restaurant:menu-created", itemId);
     sendSuccess(
         res,
         {
@@ -61,6 +95,12 @@ export const updatePartnerMenuItem = asyncHandler(async (req, res) => {
 
     await updateMenuItem(restaurant.id, req.params.itemId, payload);
     const menu = await getRestaurantMenu(restaurant.id);
+    await emitMenuUpdated(
+        restaurant,
+        menu,
+        "restaurant:menu-updated",
+        req.params.itemId
+    );
     sendSuccess(res, menu, "Menu item updated successfully");
 });
 
@@ -74,6 +114,12 @@ export const deletePartnerMenuItem = asyncHandler(async (req, res) => {
     await deleteMenuItem(restaurant.id, req.params.itemId);
 
     const menu = await getRestaurantMenu(restaurant.id);
+    await emitMenuUpdated(
+        restaurant,
+        menu,
+        "restaurant:menu-unavailable",
+        req.params.itemId
+    );
 
     sendSuccess(res, menu, "Menu item deleted successfully");
 });

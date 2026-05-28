@@ -71,7 +71,10 @@ export const findMenuItemForCart = async (menuItemId) =>
             mi.discount,
             COALESCE(mi.is_available, 1) AS is_available,
             r.is_active,
-            r.is_open
+            r.is_open,
+            COALESCE(r.delivery_enabled, 1) AS delivery_enabled,
+            COALESCE(r.is_busy, 0) AS is_busy,
+            COALESCE(r.peak_hour_available, 1) AS peak_hour_available
         FROM menu_items mi
         INNER JOIN restaurants r ON r.id = mi.restaurant_id
         WHERE mi.id = ?

@@ -18,6 +18,7 @@ import {
 } from "../../constants/index.js";
 
 import { normalizeDeliveryStatusInput } from "./helpers.js";
+import { notifyOrderStakeholders } from "../../services/notificationService.js";
 
 export const confirmDeliveryOrderPayment = asyncHandler(async (req, res) => {
     const result = await confirmOrderPaymentByDeliveryPartner({
@@ -62,6 +63,20 @@ export const pickupDeliveryOrder = asyncHandler(async (req, res) => {
 
     await updateDeliveryAvailability(req.user.id, false);
 
+    const updated = await getOrderById(req.params.orderId);
+    await notifyOrderStakeholders({
+        order: updated,
+        title: "Order picked up",
+        message: `Order ${
+            updated?.order_number || updated?.id
+        } is on the way.`,
+        type: "order_status",
+        data: {
+            status: ORDER_STATUS.ON_THE_WAY,
+            actorRole: "delivery_partner",
+        },
+    });
+
     sendSuccess(res, null, "Order picked up successfully");
 });
 
@@ -93,6 +108,20 @@ export const completeDeliveryOrder = asyncHandler(async (req, res) => {
     });
 
     await updateDeliveryAvailability(req.user.id, true);
+
+    const updated = await getOrderById(req.params.orderId);
+    await notifyOrderStakeholders({
+        order: updated,
+        title: "Order delivered",
+        message: `Order ${
+            updated?.order_number || updated?.id
+        } was delivered successfully.`,
+        type: "order_status",
+        data: {
+            status: ORDER_STATUS.DELIVERED,
+            actorRole: "delivery_partner",
+        },
+    });
 
     sendSuccess(res, null, "Order delivered successfully");
 });

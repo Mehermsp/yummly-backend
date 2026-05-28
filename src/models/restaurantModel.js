@@ -75,6 +75,9 @@ export const listApprovedRestaurants = async ({
             r.total_orders,
             r.cuisines,
             r.is_open,
+            COALESCE(r.delivery_enabled, 1) AS delivery_enabled,
+            COALESCE(r.is_busy, 0) AS is_busy,
+            COALESCE(r.peak_hour_available, 1) AS peak_hour_available,
             r.open_time,
             r.close_time
         FROM restaurants r

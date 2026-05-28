@@ -6,6 +6,10 @@ import {
     updateRestaurantProfileByOwnerId,
 } from "../../models/restaurantModel.js";
 import { deleteImage } from "../../utils/cloudinary.js";
+import {
+    emitRealtimeEvent,
+    notifyAdmins,
+} from "../../services/notificationService.js";
 
 export const getPartnerProfile = asyncHandler(async (req, res) => {
     const restaurant = await getRestaurantByOwnerId(req.user.id);
@@ -54,5 +58,35 @@ export const updatePartnerOperations = asyncHandler(async (req, res) => {
     await updateRestaurantOperationsByOwnerId(req.user.id, req.body || {});
 
     const restaurant = await getRestaurantByOwnerId(req.user.id);
+
+    emitRealtimeEvent({
+        room: `restaurant:${restaurant.id}`,
+        eventName: "restaurant:operations-updated",
+        payload: restaurant,
+    });
+    emitRealtimeEvent({
+        room: "admin:restaurants",
+        eventName: "restaurant:operations-updated",
+        payload: restaurant,
+    });
+    emitRealtimeEvent({
+        room: "admin:dashboard",
+        eventName: "restaurant:operations-updated",
+        payload: restaurant,
+    });
+
+    await notifyAdmins({
+        title: "Restaurant operations changed",
+        message: `${restaurant.name} updated operational availability.`,
+        type: "restaurant_operations",
+        data: {
+            restaurantId: restaurant.id,
+            isOpen: restaurant.is_open,
+            isBusy: restaurant.is_busy,
+            deliveryEnabled: restaurant.delivery_enabled,
+            peakHourAvailable: restaurant.peak_hour_available,
+        },
+    });
+
     sendSuccess(res, restaurant, "Restaurant operations updated successfully");
 });

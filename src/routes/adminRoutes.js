@@ -29,6 +29,7 @@ import financeRoutes from "./admin/finance.js";
 // Support & Refunds
 import refundRoutes from "./admin/refunds.js";
 import supportRoutes from "./admin/support.js";
+import notificationRoutes from "./admin/notifications.js";
 
 const router = Router();
 
@@ -87,5 +88,6 @@ router.use("/logs", logRoutes);
 
 router.use("/support", supportRoutes);
 router.use("/refunds", refundRoutes);
+router.use("/notifications", notificationRoutes);
 
 export default router;

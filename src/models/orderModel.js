@@ -6,6 +6,7 @@ import {
     withProductOrderStatus,
     withProductOrderStatusList,
 } from "../utils/orderStatus.js";
+import { invalidateOrderCache } from "../utils/cacheInvalidation.js";
 
 // Ensure this select fragment uses the exact column names from your 'orders' table
 const orderSelect = `
@@ -98,7 +99,10 @@ export const getCustomerCheckoutSummary = async (customerId) => {
             COALESCE(mi.preparation_time_mins, 20) AS preparation_time_mins,
             COALESCE(mi.is_available, 1) AS is_available,
             r.is_active,
-            r.is_open
+            r.is_open,
+            COALESCE(r.delivery_enabled, 1) AS delivery_enabled,
+            COALESCE(r.is_busy, 0) AS is_busy,
+            COALESCE(r.peak_hour_available, 1) AS peak_hour_available
         FROM carts c
         INNER JOIN menu_items mi ON mi.id = c.menu_id
         INNER JOIN restaurants r ON r.id = mi.restaurant_id
@@ -114,7 +118,13 @@ export const getCustomerCheckoutSummary = async (customerId) => {
 
     if (
         cartItems.some(
-            (item) => !item.is_available || !item.is_active || !item.is_open
+                (item) =>
+                    !item.is_available ||
+                    !item.is_active ||
+                    !item.is_open ||
+                    !item.delivery_enabled ||
+                    item.is_busy ||
+                    !item.peak_hour_available
         )
     ) {
         throw new Error("One or more items are unavailable");
@@ -391,7 +401,10 @@ export const createOrder = async ({
                 COALESCE(mi.preparation_time_mins, 20) AS preparation_time_mins,
                 COALESCE(mi.is_available, 1) AS is_available,
                 r.is_active,
-                r.is_open
+                r.is_open,
+                COALESCE(r.delivery_enabled, 1) AS delivery_enabled,
+                COALESCE(r.is_busy, 0) AS is_busy,
+                COALESCE(r.peak_hour_available, 1) AS peak_hour_available
             FROM carts c
             INNER JOIN menu_items mi ON mi.id = c.menu_id
             INNER JOIN restaurants r ON r.id = mi.restaurant_id
@@ -405,7 +418,13 @@ export const createOrder = async ({
 
         if (
             cartItems.some(
-                (item) => !item.is_available || !item.is_active || !item.is_open
+                (item) =>
+                    !item.is_available ||
+                    !item.is_active ||
+                    !item.is_open ||
+                    !item.delivery_enabled ||
+                    item.is_busy ||
+                    !item.peak_hour_available
             )
         ) {
             throw new Error("One or more items are unavailable");
@@ -534,6 +553,15 @@ export const createOrder = async ({
             `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, 'placed', CURRENT_TIMESTAMP)`,
             [orderId]
         );
+        await connection.execute(
+            `
+            UPDATE restaurants
+            SET total_orders = COALESCE(total_orders, 0) + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            `,
+            [restaurantId]
+        );
         await connection.execute(`DELETE FROM carts WHERE user_id = ?`, [
             customerId,
         ]);
@@ -612,6 +640,7 @@ export const updateOrderStatus = async ({
         `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
         [orderId, normalizedNextStatus]
     );
+    await invalidateOrderCache(orderId);
 };
 
 export const cancelOrder = async ({
