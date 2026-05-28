@@ -100,7 +100,7 @@ export const completeDeliveryOrder = asyncHandler(async (req, res) => {
 export const updateDeliveryOrderStatus = asyncHandler(async (req, res) => {
     const status = normalizeDeliveryStatusInput(req.body?.status);
 
-    if (status === "picked_up") {
+    if (status === "picked_up" || status === "out_for_delivery") {
         return pickupDeliveryOrder(req, res);
     }
 

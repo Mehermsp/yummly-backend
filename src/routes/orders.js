@@ -22,6 +22,11 @@ import {
 // ==============================
 
 import { getOrderTracking } from "../controllers/orders/orderTrackingController.js";
+import {
+    getInvoice,
+    reorderOrder,
+    requestRefund,
+} from "../controllers/supportController.js";
 
 // ==============================
 // RESTAURANT
@@ -58,6 +63,9 @@ router.post("/", authorize(ROLES.CUSTOMER), placeOrder);
 router.get("/my", authorize(ROLES.CUSTOMER), getMyOrders);
 
 router.get("/:orderId/tracking", authorize(ROLES.CUSTOMER), getOrderTracking);
+router.get("/:orderId/invoice", authorize(ROLES.CUSTOMER), getInvoice);
+router.post("/:orderId/reorder", authorize(ROLES.CUSTOMER), reorderOrder);
+router.post("/:orderId/refund", authorize(ROLES.CUSTOMER), requestRefund);
 
 router.post("/:orderId/cancel", authorize(ROLES.CUSTOMER), cancelOrder);
 

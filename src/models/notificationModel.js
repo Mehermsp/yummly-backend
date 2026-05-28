@@ -28,6 +28,19 @@ export const listNotifications = async (userId, { limit = 40, offset = 0 }) => {
     return { items, total: Number(total) };
 };
 
+export const countUnreadNotifications = async (userId) => {
+    const [{ total }] = await query(
+        `
+        SELECT COUNT(*) AS total
+        FROM notifications
+        WHERE user_id = ? AND is_read = 0
+        `,
+        [userId]
+    );
+
+    return Number(total || 0);
+};
+
 export const markNotificationRead = async (userId, notificationId) =>
     query(
         `

@@ -4,20 +4,20 @@ export const normalizeDeliveryStatusInput = (value) => {
     const normalized = String(value || "")
         .trim()
         .toLowerCase()
-        .replace(/\s+/g, "_");
+        .replace(/[-\s]+/g, "_");
 
     const aliases = {
         accepted: "accepted",
 
         picked_up: "picked_up",
 
-        out_for_delivery: "picked_up",
+        out_for_delivery: "out_for_delivery",
 
-        on_the_way: "picked_up",
+        on_the_way: "out_for_delivery",
 
         delivered: "delivered",
 
-        out: "picked_up",
+        out: "out_for_delivery",
     };
 
     return aliases[normalized] || normalized;

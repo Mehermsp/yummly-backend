@@ -10,6 +10,7 @@ import paymentRoutes from "./payment.js";
 import restaurantRoutes from "./restaurant.js";
 import restaurantsRoutes from "./restaurants.js";
 import reviewRoutes from "./reviews.js";
+import supportRoutes from "./support.js";
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.use("/delivery", deliveryRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/payment", paymentRoutes);
+router.use("/support", supportRoutes);
 
 // Health check
 router.get("/health", (req, res) => {

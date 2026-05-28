@@ -155,46 +155,30 @@ export const createRestaurantApplication = async (payload) => {
     const result = await query(
         `
         INSERT INTO restaurant_applications (
-            owner_id,
-            owner_name,
-            restaurant_name,
-            email,
-            phone,
-            address,
-            city,
-            state,
-            pincode,
-            landmark,
-            cuisines,
-            open_time,
-            close_time,
-            days_open,
-            fssai,
-            gst,
-            pan
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            owner_id, owner_name, restaurant_name, email, phone,
+            address, city, pincode, landmark, cuisines,
+            open_time, close_time, days_open,
+            fssai, gst, pan, logo, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())
         `,
         [
             payload.ownerId,
-            payload.ownerName || payload.owner_name || null,
-            payload.restaurantName || payload.restaurant_name,
+            payload.ownerName,
+            payload.restaurantName,
             payload.email,
             payload.phone,
             payload.address,
             payload.city,
-            payload.state || null,
             payload.pincode,
             payload.landmark || null,
             JSON.stringify(payload.cuisines || []),
-            payload.openTime || payload.open_time,
-            payload.closeTime || payload.close_time,
-            JSON.stringify(payload.daysOpen || payload.days_open || []),
-            payload.fssaiNumber ||
-                payload.fssai ||
-                payload.fssai_number ||
-                null,
-            payload.gstNumber || payload.gst || payload.gst_number || null,
-            payload.panNumber || payload.pan || payload.pan_number || null,
+            payload.openTime,
+            payload.closeTime,
+            JSON.stringify(payload.daysOpen || []),
+            payload.fssai || null,
+            payload.gst || null,
+            payload.pan || null,
+            payload.logo || null,
         ]
     );
 
@@ -268,6 +252,58 @@ export const updateRestaurantProfileByOwnerId = async (
         `UPDATE restaurants SET ${fields.join(
             ", "
         )} WHERE owner_id = ? OR user_id = ?`,
+        [...values, ownerId, ownerId]
+    );
+};
+
+export const updateRestaurantOperationsByOwnerId = async (
+    ownerId,
+    payload = {}
+) => {
+    const fields = [];
+    const values = [];
+
+    const assign = (column, value) => {
+        if (value === undefined) return;
+        fields.push(`${column} = ?`);
+        values.push(value);
+    };
+
+    const assignBoolean = (column, value) => {
+        if (value === undefined) return;
+        assign(column, value ? 1 : 0);
+    };
+
+    assignBoolean("is_open", payload.isOpen ?? payload.is_open);
+    assignBoolean("is_busy", payload.isBusy ?? payload.is_busy);
+    assignBoolean(
+        "delivery_enabled",
+        payload.deliveryEnabled ?? payload.delivery_enabled
+    );
+    assignBoolean(
+        "peak_hour_available",
+        payload.peakHourAvailable ?? payload.peak_hour_available
+    );
+
+    const radius = payload.deliveryRadiusKm ?? payload.delivery_radius_km;
+    if (radius !== undefined) {
+        const safeRadius = Number(radius);
+        assign(
+            "delivery_radius_km",
+            Number.isFinite(safeRadius) && safeRadius > 0 ? safeRadius : null
+        );
+    }
+
+    assign("operations_note", payload.operationsNote ?? payload.operations_note);
+
+    if (!fields.length) return;
+
+    await query(
+        `
+        UPDATE restaurants
+        SET ${fields.join(", ")}, updated_at = NOW()
+        WHERE owner_id = ? OR user_id = ?
+        `,
         [...values, ownerId, ownerId]
     );
 };

@@ -13,6 +13,16 @@ import {
 } from "../controllers/authController.js";
 
 import { authenticate } from "../middleware/authenticate.js";
+import { authLimiter } from "../middleware/rateLimiters.js";
+import { validateRequest } from "../middleware/validation.js";
+import {
+    registerSchema,
+    loginSchema,
+    requestOtpSchema,
+    verifyOtpSchema,
+    passwordResetSchema,
+    updateMeSchema,
+} from "../validators/authValidator.js";
 
 const router = Router();
 
@@ -20,9 +30,9 @@ const router = Router();
 // AUTHENTICATION
 // =====================================================
 
-router.post("/register", register);
+router.post("/register", authLimiter, registerSchema, validateRequest, register);
 
-router.post("/login", login);
+router.post("/login", authLimiter, loginSchema, validateRequest, login);
 
 router.post("/logout", authenticate, logout);
 
@@ -30,20 +40,26 @@ router.post("/logout", authenticate, logout);
 // OTP
 // =====================================================
 
-router.post("/request-otp", requestOtp);
+router.post("/request-otp", authLimiter, requestOtpSchema, validateRequest, requestOtp);
 
-router.post("/verify-otp", verifyOtp);
+router.post("/verify-otp", authLimiter, verifyOtpSchema, validateRequest, verifyOtp);
 
 // =====================================================
 // PASSWORD RESET
 // =====================================================
 
-router.post("/request-password-reset", requestPasswordReset);
+router.post(
+    "/request-password-reset",
+    authLimiter,
+    passwordResetSchema,
+    validateRequest,
+    requestPasswordReset
+);
 
 // Backward compatibility
-router.post("/send-reset-otp", requestPasswordReset);
+router.post("/send-reset-otp", authLimiter, passwordResetSchema, validateRequest, requestPasswordReset);
 
-router.post("/reset-password", resetPassword);
+router.post("/reset-password", authLimiter, passwordResetSchema, validateRequest, resetPassword);
 
 // =====================================================
 // USER PROFILE
@@ -51,6 +67,6 @@ router.post("/reset-password", resetPassword);
 
 router.get("/me", authenticate, getMe);
 
-router.put("/me", authenticate, updateMe);
+router.put("/me", authenticate, updateMeSchema, validateRequest, updateMe);
 
 export default router;

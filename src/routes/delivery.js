@@ -36,6 +36,10 @@ import {
     completeDeliveryOrder,
     updateDeliveryOrderStatus,
 } from "../controllers/delivery/deliveryStatusController.js";
+import {
+    getMyDeliveryBank,
+    saveMyDeliveryBank,
+} from "../controllers/financeController.js";
 
 const router = Router();
 
@@ -52,6 +56,10 @@ router.get("/orders", getDeliveryOrders);
 router.get("/income", getDeliveryIncome);
 
 router.patch("/availability", setDeliveryAvailability);
+
+router.get("/bank-account", getMyDeliveryBank);
+
+router.put("/bank-account", saveMyDeliveryBank);
 
 // =====================================================
 // ORDER STATUS

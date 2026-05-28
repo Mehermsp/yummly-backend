@@ -20,6 +20,12 @@ export const getOpenOrders = async (deliveryPartnerId) => {
 };
 
 export const acceptOrder = async ({ orderId, deliveryPartnerId }) => {
+    const order = await getOrderById(orderId);
+
+    if (!order) {
+        throw new AppError(404, "Order not found");
+    }
+
     const result = await claimReadyOrderAssignment({
         orderId,
         deliveryPartnerId,
@@ -35,16 +41,6 @@ export const acceptOrder = async ({ orderId, deliveryPartnerId }) => {
         deliveryPartnerId,
 
         status: "accepted",
-    });
-
-    await updateOrderStatus({
-        orderId,
-
-        nextStatus: "picked_up",
-
-        actorId: deliveryPartnerId,
-
-        actorRole: "delivery_partner",
     });
 
     return await getOrderById(orderId);

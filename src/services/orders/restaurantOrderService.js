@@ -9,31 +9,7 @@ import {
 } from "../../models/orderModel.js";
 
 import { getRestaurantByOwnerId } from "../../models/restaurantModel.js";
-
-const normalizeOrderStatusInput = (value) => {
-    const normalized = String(value || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[-\s]+/g, "_")
-        .replace(/_+/g, "_");
-
-    const aliases = {
-        accepted: "confirmed",
-        confirmed: "confirmed",
-        preparing: "preparing",
-        prepared: "prepared",
-        ready_to_pickup: "ready",
-        ready_forpickup: "ready",
-        ready_for_pickup: "ready",
-        ready: "ready",
-        picked_up: "picked_up",
-        on_the_way: "on_the_way",
-        delivered: "delivered",
-        cancelled: "cancelled",
-    };
-
-    return aliases[normalized] || normalized;
-};
+import { normalizeOrderStatusInput } from "../../utils/orderStatus.js";
 
 const validateRestaurantStatusTransition = (currentStatus, nextStatus) => {
     const allowedTransitions = {

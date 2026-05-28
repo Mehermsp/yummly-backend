@@ -1,0 +1,45 @@
+CREATE TABLE IF NOT EXISTS partner_bank_accounts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    partner_type ENUM('restaurant', 'delivery_partner') NOT NULL,
+    partner_id BIGINT UNSIGNED NOT NULL,
+    account_holder_name VARCHAR(120) NOT NULL,
+    bank_name VARCHAR(120) NOT NULL,
+    account_number VARCHAR(34) NOT NULL,
+    ifsc_code VARCHAR(16) NOT NULL,
+    upi_id VARCHAR(80) NULL,
+    status ENUM('pending', 'verified', 'rejected') NOT NULL DEFAULT 'pending',
+    verification_notes TEXT NULL,
+    verified_by BIGINT UNSIGNED NULL,
+    verified_at DATETIME NULL,
+    rejected_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_partner_bank (partner_type, partner_id),
+    INDEX idx_partner_bank_status (status, partner_type)
+);
+
+CREATE TABLE IF NOT EXISTS monthly_settlements (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    settlement_number VARCHAR(40) NOT NULL UNIQUE,
+    partner_type ENUM('restaurant', 'delivery_partner') NOT NULL,
+    partner_id BIGINT UNSIGNED NOT NULL,
+    bank_account_id BIGINT UNSIGNED NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    platform_fee DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    adjustments DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    net_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    status ENUM('generated', 'approved', 'processing', 'paid', 'failed', 'on_hold') NOT NULL DEFAULT 'generated',
+    payment_reference VARCHAR(128) NULL,
+    admin_notes TEXT NULL,
+    generated_by BIGINT UNSIGNED NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    paid_at DATETIME NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_partner_period (partner_type, partner_id, period_start, period_end),
+    INDEX idx_monthly_settlements_period (period_start, period_end),
+    INDEX idx_monthly_settlements_status (status, partner_type),
+    CONSTRAINT fk_monthly_settlements_bank
+        FOREIGN KEY (bank_account_id) REFERENCES partner_bank_accounts(id)
+);

@@ -23,6 +23,13 @@ import settingsRoutes from "./admin/settings.js";
 // Logs
 import logRoutes from "./admin/logs.js";
 
+// Finance
+import financeRoutes from "./admin/finance.js";
+
+// Support & Refunds
+import refundRoutes from "./admin/refunds.js";
+import supportRoutes from "./admin/support.js";
+
 const router = Router();
 
 // ==============================
@@ -63,9 +70,22 @@ router.use("/users", userRoutes);
 router.use("/settings", settingsRoutes);
 
 // ==============================
+// FINANCE
+// ==============================
+
+router.use("/finance", financeRoutes);
+
+// ==============================
 // LOGS
 // ==============================
 
 router.use("/logs", logRoutes);
+
+// ==============================
+// SUPPORT & REFUNDS
+// ==============================
+
+router.use("/support", supportRoutes);
+router.use("/refunds", refundRoutes);
 
 export default router;

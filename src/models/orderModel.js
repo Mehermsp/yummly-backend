@@ -1,5 +1,11 @@
 import { getOne, query, withTransaction } from "../config/db.js";
 import { ORDER_STATUS } from "../constants/index.js";
+import {
+    normalizeOrderStatusInput,
+    toProductOrderStatus,
+    withProductOrderStatus,
+    withProductOrderStatusList,
+} from "../utils/orderStatus.js";
 
 // Ensure this select fragment uses the exact column names from your 'orders' table
 const orderSelect = `
@@ -118,8 +124,10 @@ export const getCustomerCheckoutSummary = async (customerId) => {
 };
 
 // ====================== CUSTOMER ======================
-export const listCustomerOrders = async (customerId, status) =>
-    query(
+export const listCustomerOrders = async (customerId, status) => {
+    const persistedStatus = status ? normalizeOrderStatusInput(status) : null;
+
+    const orders = await query(
         `
         SELECT
             o.id,
@@ -137,11 +145,16 @@ export const listCustomerOrders = async (customerId, status) =>
           AND (? IS NULL OR o.status = ?)
         ORDER BY o.created_at DESC
         `,
-        [customerId, status || null, status || null]
+        [customerId, persistedStatus, persistedStatus]
     );
 
+    return withProductOrderStatusList(orders);
+};
+
 export const getOrderById = async (orderId) =>
-    getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId]);
+    withProductOrderStatus(
+        await getOne(`${orderSelect} WHERE o.id = ? LIMIT 1`, [orderId])
+    );
 
 export const findOrderByPaymentReference = async (paymentReference) => {
     try {
@@ -342,8 +355,8 @@ export const getOrderItems = async (orderId) => {
     return enrichOrderItemsWithImages(rows);
 };
 
-export const getOrderStatusLogs = async (orderId) =>
-    query(
+export const getOrderStatusLogs = async (orderId) => {
+    const logs = await query(
         `
         SELECT status, updated_at AS created_at
         FROM order_status_logs
@@ -352,6 +365,9 @@ export const getOrderStatusLogs = async (orderId) =>
         `,
         [orderId]
     );
+
+    return withProductOrderStatusList(logs);
+};
 
 // ====================== CREATE ORDER (Fixed Columns) ======================
 export const createOrder = async ({
@@ -535,9 +551,11 @@ export const updateOrderStatus = async ({
     notes,
     deliveryPartnerId,
 }) => {
-    const statusTimestampFragment = statusTimestampFragments[nextStatus] || "";
+    const normalizedNextStatus = normalizeOrderStatusInput(nextStatus);
+    const statusTimestampFragment =
+        statusTimestampFragments[normalizedNextStatus] || "";
     const paymentSet =
-        nextStatus === ORDER_STATUS.DELIVERED
+        normalizedNextStatus === ORDER_STATUS.DELIVERED
             ? `, payment_status = CASE WHEN payment_method = 'cash' THEN 'completed' ELSE payment_status END`
             : "";
     const deliveryPartnerSet =
@@ -553,7 +571,7 @@ export const updateOrderStatus = async ({
     } ${paymentSet}
         WHERE id = ?
     `;
-    const primaryParams = [nextStatus, notes || null];
+    const primaryParams = [normalizedNextStatus, notes || null];
     if (deliveryPartnerId !== undefined) {
         primaryParams.push(deliveryPartnerId || null);
     }
@@ -570,7 +588,7 @@ export const updateOrderStatus = async ({
             ${paymentSet}
         WHERE id = ?
     `;
-    const fallbackParams = [nextStatus];
+    const fallbackParams = [normalizedNextStatus];
     if (deliveryPartnerId !== undefined) {
         fallbackParams.push(deliveryPartnerId || null);
     }
@@ -585,14 +603,14 @@ export const updateOrderStatus = async ({
         } catch {
             // Last fallback for very old schemas that may not have updated_at.
             await query(`UPDATE orders SET status = ? WHERE id = ?`, [
-                nextStatus,
+                normalizedNextStatus,
                 orderId,
             ]);
         }
     }
     await query(
         `INSERT INTO order_status_logs (order_id, status, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-        [orderId, nextStatus]
+        [orderId, normalizedNextStatus]
     );
 };
 
@@ -861,8 +879,10 @@ export const clearOrderDeliveryPartner = async (orderId, deliveryPartnerId) =>
         [orderId, deliveryPartnerId]
     );
 
-export const listRestaurantOrders = async (restaurantId, status) =>
-    query(
+export const listRestaurantOrders = async (restaurantId, status) => {
+    const persistedStatus = status ? normalizeOrderStatusInput(status) : null;
+
+    const orders = await query(
         `
         SELECT o.id, o.order_number, o.status, o.total, o.payment_status, o.created_at,
                o.notes AS customer_notes, c.name AS customer_name, c.phone AS customer_phone,
@@ -872,11 +892,14 @@ export const listRestaurantOrders = async (restaurantId, status) =>
         WHERE o.restaurant_id = ? AND (? IS NULL OR o.status = ?)
         ORDER BY o.created_at DESC
         `,
-        [restaurantId, status || null, status || null]
+        [restaurantId, persistedStatus, persistedStatus]
     );
 
-export const listDeliveryAssignments = async (deliveryPartnerId) =>
-    query(
+    return withProductOrderStatusList(orders);
+};
+
+export const listDeliveryAssignments = async (deliveryPartnerId) => {
+    const assignments = await query(
         `
         SELECT 
             da.order_id, 
@@ -922,6 +945,12 @@ export const listDeliveryAssignments = async (deliveryPartnerId) =>
         `,
         [deliveryPartnerId]
     );
+
+    return assignments.map((assignment) => ({
+        ...assignment,
+        order_product_status: toProductOrderStatus(assignment.order_status),
+    }));
+};
 
 export const adminAssignOrder = async ({
     orderId,

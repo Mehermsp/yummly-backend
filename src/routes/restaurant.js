@@ -24,8 +24,14 @@ import { getPartnerDashboard } from "../controllers/restaurant/restaurantDashboa
 
 import {
     getPartnerProfile,
+    updatePartnerOperations,
     updatePartnerProfile,
 } from "../controllers/restaurant/restaurantProfileController.js";
+import {
+    getMyRestaurantBank,
+    saveMyRestaurantBank,
+} from "../controllers/financeController.js";
+import { upload } from "../middleware/upload.js";
 
 // =====================================================
 // MENU CONTROLLER
@@ -54,7 +60,10 @@ router.get("/dashboard", getPartnerDashboard);
 
 router.get("/profile", getPartnerProfile);
 
-router.put("/profile", updatePartnerProfile);
+router.put("/profile", upload.single("image"), updatePartnerProfile);
+router.patch("/operations", updatePartnerOperations);
+router.get("/bank-account", getMyRestaurantBank);
+router.put("/bank-account", saveMyRestaurantBank);
 
 // =====================================================
 // APPLICATIONS
@@ -68,9 +77,9 @@ router.post("/applications", submitApplication);
 
 router.get("/menu", getPartnerMenu);
 
-router.post("/menu", createPartnerMenuItem);
+router.post("/menu", upload.single("image"), createPartnerMenuItem);
 
-router.put("/menu/:itemId", updatePartnerMenuItem);
+router.put("/menu/:itemId", upload.single("image"), updatePartnerMenuItem);
 
 router.delete("/menu/:itemId", deletePartnerMenuItem);
 

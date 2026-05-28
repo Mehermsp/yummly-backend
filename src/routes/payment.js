@@ -3,6 +3,7 @@ import { ROLES } from "../constants/index.js";
 import {
     completeMockPaymentAndPlaceOrder,
     getMockPaymentConfig,
+    selectPaymentMethod,
 } from "../controllers/paymentController.js";
 import { authenticate } from "../middleware/authenticate.js";
 import { authorize } from "../middleware/authorize.js";

@@ -16,6 +16,7 @@ export const getOrderTracking = async ({ orderId, customerId }) => {
         orderNumber: order.order_number,
 
         status: order.status,
+        productStatus: order.product_status,
 
         deliveryPartnerName: order.delivery_partner_name,
 

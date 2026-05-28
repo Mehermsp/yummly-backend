@@ -15,6 +15,7 @@ export const ORDER_STATUS = {
     ON_THE_WAY: "on_the_way",
     DELIVERED: "delivered",
     CANCELLED: "cancelled",
+    REFUNDED: "refunded",
 };
 
 export const DELIVERY_ASSIGNMENT_STATUS = {

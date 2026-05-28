@@ -81,6 +81,16 @@ export const markPhoneVerified = async (userId) =>
         [userId]
     );
 
+export const markEmailVerified = async (userId) =>
+    query(
+        `
+        UPDATE users
+        SET is_email_verified = 1
+        WHERE id = ?
+        `,
+        [userId]
+    );
+
 export const createOtpVerification = async ({
     userId,
     email,

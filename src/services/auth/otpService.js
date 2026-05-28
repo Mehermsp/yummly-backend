@@ -11,6 +11,7 @@ import { sendEmail } from "../../utils/email.js";
 import {
     createOtpVerification,
     consumeOtpVerification,
+    markEmailVerified,
     markOtpUsed,
     markPhoneVerified,
     savePasswordResetToken,
@@ -19,6 +20,16 @@ import {
 } from "../../models/userModel.js";
 
 import { issueTokens } from "./authService.js";
+
+const isEmailIdentifier = (value) => /\S+@\S+\.\S+/.test(String(value || ""));
+
+const normalizeOtpLookup = ({ phone, email }) => {
+    if (!email && isEmailIdentifier(phone)) {
+        return { phone: null, email: phone };
+    }
+
+    return { phone, email };
+};
 
 export const sendOtp = async ({ identifier, type = "login" }) => {
     if (!identifier) {
@@ -81,10 +92,11 @@ export const verifyOtp = async ({
     type = "login",
 }) => {
     const otpValue = otpCode || otp;
+    const lookup = normalizeOtpLookup({ phone, email });
 
     const row = await consumeOtpVerification({
-        phone,
-        email,
+        phone: lookup.phone,
+        email: lookup.email,
         otpCode: otpValue,
 
         type,
@@ -125,7 +137,13 @@ export const verifyOtp = async ({
         };
     }
 
-    await markPhoneVerified(row.user_id);
+    if (row.email) {
+        await markEmailVerified(row.user_id);
+    }
+
+    if (row.phone) {
+        await markPhoneVerified(row.user_id);
+    }
 
     const user = await getUserById(row.user_id);
 

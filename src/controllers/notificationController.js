@@ -2,6 +2,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendPaginated, sendSuccess } from "../utils/http.js";
 import { buildPagination, getPagination } from "../utils/pagination.js";
 import {
+    countUnreadNotifications,
     listNotifications,
     markAllNotificationsRead,
     markNotificationRead,
@@ -19,6 +20,15 @@ export const getNotifications = asyncHandler(async (req, res) => {
         items,
         buildPagination(page, limit, total),
         "Notifications fetched successfully"
+    );
+});
+
+export const getUnreadNotificationCount = asyncHandler(async (req, res) => {
+    const unreadCount = await countUnreadNotifications(req.user.id);
+    sendSuccess(
+        res,
+        { unreadCount },
+        "Unread notification count fetched successfully"
     );
 });
 

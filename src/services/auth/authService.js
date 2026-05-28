@@ -44,11 +44,17 @@ export const register = async ({
     password,
     adminBootstrapSecret,
 }) => {
-    if (!role || !name || !email || !phone || !password) {
+    if (!role || !name || !email || !password) {
         throw new AppError(
             400,
-            "role, name, email, phone and password are required"
+            "role, name, email and password are required"
         );
+    }
+
+    const normalizedPhone = phone || (role === ROLES.CUSTOMER ? email : null);
+
+    if (!normalizedPhone) {
+        throw new AppError(400, "phone is required for this role");
     }
 
     if (!Object.values(ROLES).includes(role)) {
@@ -65,7 +71,7 @@ export const register = async ({
 
     const existing = await findUserByEmailOrPhone({
         email,
-        phone,
+        phone: normalizedPhone,
     });
 
     if (existing) {
@@ -78,7 +84,7 @@ export const register = async ({
         role,
         name,
         email,
-        phone,
+        phone: normalizedPhone,
         passwordHash,
     });
 

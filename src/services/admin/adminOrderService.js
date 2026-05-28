@@ -1,4 +1,9 @@
 import { query, withTransaction } from "../../config/db.js";
+import {
+    normalizeOrderStatusInput,
+    withProductOrderStatus,
+    withProductOrderStatusList,
+} from "../../utils/orderStatus.js";
 
 export const getOrders = async (filters = {}) => {
     const { status, limit } = filters;
@@ -53,7 +58,7 @@ export const getOrders = async (filters = {}) => {
 
     if (status && status !== "all") {
         sql += " AND o.status = ?";
-        params.push(status);
+        params.push(normalizeOrderStatusInput(status));
     }
 
     sql += " ORDER BY o.created_at DESC";
@@ -64,7 +69,7 @@ export const getOrders = async (filters = {}) => {
 
     const orders = await query(sql, params);
 
-    return orders.map((o) => ({
+    return withProductOrderStatusList(orders).map((o) => ({
         ...o,
         delivery_address: [
             o.door_no,
@@ -136,7 +141,7 @@ export const getOrderById = async (id) => {
         id,
     ]);
 
-    const order = orders[0];
+    const order = withProductOrderStatus(orders[0]);
 
     order.items = items;
 
@@ -181,7 +186,7 @@ export const getReadyForPickupOrders = async () => {
         ORDER BY o.created_at DESC
     `);
 
-    return orders.map((o) => ({
+    return withProductOrderStatusList(orders).map((o) => ({
         ...o,
         delivery_address: [
             o.door_no,
@@ -215,9 +220,10 @@ export const assignDeliveryPartner = async ({
             throw new Error("Order not found");
         }
 
-        const order = orderRows[0];
+        const order = withProductOrderStatus(orderRows[0]);
+        const orderStatus = normalizeOrderStatusInput(order.status);
 
-        if (["delivered", "cancelled"].includes(order.status)) {
+        if (["delivered", "cancelled"].includes(orderStatus)) {
             throw new Error(
                 "Cannot assign delivery for delivered or cancelled orders"
             );
@@ -231,7 +237,7 @@ export const assignDeliveryPartner = async ({
             "out_for_delivery",
         ];
 
-        if (!allowedStatuses.includes(order.status)) {
+        if (!allowedStatuses.includes(orderStatus)) {
             throw new Error(
                 `Delivery assignment not allowed for status: ${order.status}`
             );

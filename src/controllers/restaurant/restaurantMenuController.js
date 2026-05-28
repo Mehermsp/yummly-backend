@@ -24,15 +24,17 @@ export const getPartnerMenu = asyncHandler(async (req, res) => {
 
 export const createPartnerMenuItem = asyncHandler(async (req, res) => {
     const restaurant = await getRestaurantByOwnerId(req.user.id);
-
     if (!restaurant) {
         throw new AppError(404, "Restaurant account is not active");
     }
 
-    const itemId = await createMenuItem(restaurant.id, req.body);
+    let payload = req.body || {};
+    if (req.file && req.file.path) {
+        payload.image = req.file.path;
+    }
 
+    const itemId = await createMenuItem(restaurant.id, payload);
     const menu = await getRestaurantMenu(restaurant.id);
-
     sendSuccess(
         res,
         {
@@ -46,15 +48,19 @@ export const createPartnerMenuItem = asyncHandler(async (req, res) => {
 
 export const updatePartnerMenuItem = asyncHandler(async (req, res) => {
     const restaurant = await getRestaurantByOwnerId(req.user.id);
-
     if (!restaurant) {
         throw new AppError(404, "Restaurant account is not active");
     }
 
-    await updateMenuItem(restaurant.id, req.params.itemId, req.body);
+    let payload = req.body || {};
+    if (req.file && req.file.path) {
+        // Remove old image from Cloudinary if exists
+        // (You may want to fetch the old item and delete its image if needed)
+        payload.image = req.file.path;
+    }
 
+    await updateMenuItem(restaurant.id, req.params.itemId, payload);
     const menu = await getRestaurantMenu(restaurant.id);
-
     sendSuccess(res, menu, "Menu item updated successfully");
 });
 
