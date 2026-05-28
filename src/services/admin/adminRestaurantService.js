@@ -6,11 +6,34 @@ const isUnknownColumnError = (error) =>
         .toLowerCase()
         .includes("unknown column");
 
+let restaurantApplicationColumnNamesPromise;
+
+const getRestaurantApplicationColumnNames = async () => {
+    if (!restaurantApplicationColumnNamesPromise) {
+        restaurantApplicationColumnNamesPromise = query(
+            "SHOW COLUMNS FROM restaurant_applications"
+        ).then((rows) => new Set(rows.map((row) => row.Field)));
+    }
+
+    return restaurantApplicationColumnNamesPromise;
+};
+
+const getRestaurantApplicationLegalColumns = async () => {
+    const columns = await getRestaurantApplicationColumnNames();
+
+    return {
+        fssai: columns.has("fssai") ? "fssai" : "fssai_number",
+        gst: columns.has("gst") ? "gst" : "gst_number",
+        pan: columns.has("pan") ? "pan" : "pan_number",
+    };
+};
+
 // ==============================
 // APPLICATIONS
 // ==============================
 
 export const getApplications = async (limit) => {
+    const legalColumns = await getRestaurantApplicationLegalColumns();
     let sql = `
         SELECT 
             id,
@@ -26,9 +49,9 @@ export const getApplications = async (limit) => {
             cuisines as cuisine_type,
             open_time as opening_time,
             close_time as closing_time,
-            fssai_number as license_number,
-            gst_number as gst_number,
-            pan_number as pan_number,
+            ${legalColumns.fssai} as license_number,
+            ${legalColumns.gst} as gst_number,
+            ${legalColumns.pan} as pan_number,
             status,
             review_notes as rejection_reason,
             created_at,
@@ -83,6 +106,7 @@ export const getApplications = async (limit) => {
 };
 
 export const getApplicationById = async (id) => {
+    const legalColumns = await getRestaurantApplicationLegalColumns();
     try {
         const applications = await query(
             `
@@ -102,9 +126,9 @@ export const getApplicationById = async (id) => {
                 open_time as opening_time,
                 close_time as closing_time,
                 days_open,
-                fssai_number as license_number,
-                gst_number as gst_number,
-                pan_number as pan_number,
+                ${legalColumns.fssai} as license_number,
+                ${legalColumns.gst} as gst_number,
+                ${legalColumns.pan} as pan_number,
                 logo,
                 status,
                 review_notes as rejection_reason,
