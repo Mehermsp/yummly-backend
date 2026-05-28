@@ -6,6 +6,16 @@ const buildTicketNumber = () =>
 const buildRefundNumber = () =>
     `TK-REF-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
 
+const normalizeLimit = (limit, fallback = 100, max = 500) => {
+    const parsed = Number.parseInt(limit, 10);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    return Math.min(parsed, max);
+};
+
 export const createSupportTicket = async ({
     userId,
     role = "customer",
@@ -82,8 +92,10 @@ export const listSupportTicketsForAdmin = async ({
     priority,
     assignedAdminId,
     limit = 100,
-} = {}) =>
-    query(
+} = {}) => {
+    const safeLimit = normalizeLimit(limit);
+
+    return query(
         `
         SELECT
             st.*,
@@ -100,7 +112,7 @@ export const listSupportTicketsForAdmin = async ({
         ORDER BY
             FIELD(st.priority, 'urgent', 'high', 'normal', 'low'),
             st.updated_at DESC
-        LIMIT ?
+        LIMIT ${safeLimit}
         `,
         [
             status || null,
@@ -109,9 +121,9 @@ export const listSupportTicketsForAdmin = async ({
             priority || null,
             assignedAdminId || null,
             assignedAdminId || null,
-            Number(limit) || 100,
         ]
     );
+};
 
 export const getSupportTicketById = async (ticketId) =>
     getOne(`SELECT * FROM support_tickets WHERE id = ? LIMIT 1`, [ticketId]);
@@ -269,8 +281,10 @@ export const listRefundRequests = async ({
     customerId,
     status,
     limit = 100,
-} = {}) =>
-    query(
+} = {}) => {
+    const safeLimit = normalizeLimit(limit);
+
+    return query(
         `
         SELECT
             rr.*,
@@ -284,16 +298,16 @@ export const listRefundRequests = async ({
         WHERE (? IS NULL OR rr.customer_id = ?)
           AND (? IS NULL OR rr.status = ?)
         ORDER BY rr.requested_at DESC
-        LIMIT ?
+        LIMIT ${safeLimit}
         `,
         [
             customerId || null,
             customerId || null,
             status || null,
             status || null,
-            Number(limit) || 100,
         ]
     );
+};
 
 export const updateRefundRequest = async ({
     refundId,
