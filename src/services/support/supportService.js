@@ -1,5 +1,6 @@
 import { getCartForUser, upsertCartItem } from "../../models/cartModel.js";
 import { getOrderById, getOrderItems, updateOrderStatus } from "../../models/orderModel.js";
+import { createRefundTransaction } from "../finance/incomeManagementService.js";
 import {
     addSupportMessage,
     createRefundRequest,
@@ -417,6 +418,16 @@ export const updateAdminRefund = async ({
     });
 
     if (status === "processed") {
+        await createRefundTransaction({
+            orderId: refund.order_id,
+            refundAmount: refund.amount,
+            refundReason: refund.reason,
+            refundStatus: "completed",
+            gatewayRefundId,
+            idempotencyKey: `support-refund:${refund.id}`,
+            createdBy: adminId,
+        });
+
         await updateOrderStatus({
             orderId: refund.order_id,
             nextStatus: "refunded",

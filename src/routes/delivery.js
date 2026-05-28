@@ -38,6 +38,7 @@ import {
 } from "../controllers/delivery/deliveryStatusController.js";
 import {
     getMyDeliveryBank,
+    getMyDeliveryIncome,
     saveMyDeliveryBank,
 } from "../controllers/financeController.js";
 
@@ -60,6 +61,8 @@ router.patch("/availability", setDeliveryAvailability);
 router.get("/bank-account", getMyDeliveryBank);
 
 router.put("/bank-account", saveMyDeliveryBank);
+
+router.get("/finance", getMyDeliveryIncome);
 
 // =====================================================
 // ORDER STATUS

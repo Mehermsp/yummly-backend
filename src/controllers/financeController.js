@@ -1,5 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/http.js";
+import * as incomeService from "../services/finance/incomeManagementService.js";
 import * as settlementService from "../services/finance/settlementService.js";
 
 export const getMyRestaurantBank = asyncHandler(async (req, res) => {
@@ -26,4 +27,14 @@ export const saveMyDeliveryBank = asyncHandler(async (req, res) => {
         payload: req.body,
     });
     sendSuccess(res, bank, "Delivery bank account submitted for verification");
+});
+
+export const getMyRestaurantIncome = asyncHandler(async (req, res) => {
+    const income = await incomeService.getRestaurantFinancialDashboard(req.user.id);
+    sendSuccess(res, income, "Restaurant income fetched successfully");
+});
+
+export const getMyDeliveryIncome = asyncHandler(async (req, res) => {
+    const income = await incomeService.getDeliveryFinancialDashboard(req.user.id);
+    sendSuccess(res, income, "Delivery income fetched successfully");
 });

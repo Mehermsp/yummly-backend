@@ -29,6 +29,7 @@ import {
 } from "../controllers/restaurant/restaurantProfileController.js";
 import {
     getMyRestaurantBank,
+    getMyRestaurantIncome,
     saveMyRestaurantBank,
 } from "../controllers/financeController.js";
 import { upload } from "../middleware/upload.js";
@@ -62,6 +63,7 @@ router.get("/profile", getPartnerProfile);
 
 router.put("/profile", upload.single("image"), updatePartnerProfile);
 router.patch("/operations", updatePartnerOperations);
+router.get("/income", getMyRestaurantIncome);
 router.get("/bank-account", getMyRestaurantBank);
 router.put("/bank-account", saveMyRestaurantBank);
 

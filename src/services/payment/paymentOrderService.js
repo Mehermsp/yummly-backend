@@ -15,6 +15,7 @@ import { sendEmail } from "../../utils/email.js";
 
 import { AppError } from "../../utils/http.js";
 import { notifyOrderStakeholders } from "../notificationService.js";
+import { recordPaymentCapture } from "../finance/incomeManagementService.js";
 
 import {
     normalizeMethod,
@@ -144,6 +145,23 @@ export const processMockPaymentAndPlaceOrder = async ({
             method,
 
             customerId: userId,
+        },
+    });
+
+    await recordPaymentCapture({
+        orderId,
+        customerId: userId,
+        paymentGateway: paymentProvider,
+        gatewayTransactionId: transactionId,
+        amount: checkoutSummary.total,
+        currency: "INR",
+        paymentStatus: paymentRecordStatus,
+        idempotencyKey: `order-payment:${orderId}:${transactionId}`,
+        gatewayPayload: {
+            simulated: !isCashOnDelivery,
+            method,
+            customerId: userId,
+            platformAccountFlow: true,
         },
     });
 

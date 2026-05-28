@@ -7,6 +7,8 @@ import {
     withProductOrderStatusList,
 } from "../utils/orderStatus.js";
 import { invalidateOrderCache } from "../utils/cacheInvalidation.js";
+import { finalizeDeliveredOrderFinancials } from "../services/finance/incomeManagementService.js";
+import { logger } from "../utils/logger.js";
 
 // Ensure this select fragment uses the exact column names from your 'orders' table
 const orderSelect = `
@@ -698,6 +700,17 @@ export const updateOrderStatus = async ({
         notes,
     });
     await invalidateOrderCache(orderId);
+
+    if (normalizedNextStatus === ORDER_STATUS.DELIVERED) {
+        try {
+            await finalizeDeliveredOrderFinancials({ orderId });
+        } catch (error) {
+            logger.error("Delivered order financial finalization failed", {
+                orderId,
+                error: error?.message,
+            });
+        }
+    }
 };
 
 export const cancelOrder = async ({
