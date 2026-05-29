@@ -1,6 +1,7 @@
 import { getOne, query, withTransaction } from "../config/db.js";
 import { ORDER_STATUS } from "../constants/index.js";
 import {
+    canTransitionOrderStatus,
     normalizeOrderStatusInput,
     toProductOrderStatus,
     withProductOrderStatus,
@@ -9,6 +10,7 @@ import {
 import { invalidateOrderCache } from "../utils/cacheInvalidation.js";
 import { finalizeDeliveredOrderFinancials } from "../services/finance/incomeManagementService.js";
 import { logger } from "../utils/logger.js";
+import { AppError } from "../utils/http.js";
 
 // Ensure this select fragment uses the exact column names from your 'orders' table
 const orderSelect = `
@@ -635,82 +637,124 @@ export const updateOrderStatus = async ({
     deliveryPartnerId,
 }) => {
     const normalizedNextStatus = normalizeOrderStatusInput(nextStatus);
-    const statusTimestampFragment =
-        statusTimestampFragments[normalizedNextStatus] || "";
-    const paymentSet =
-        normalizedNextStatus === ORDER_STATUS.DELIVERED
-            ? `, payment_status = CASE WHEN payment_method = 'cash' THEN 'completed' ELSE payment_status END`
-            : "";
-    const deliveryPartnerSet =
-        deliveryPartnerId !== undefined
-            ? ", delivery_partner_id = COALESCE(?, delivery_partner_id)"
-            : "";
 
-    const sqlPrimary = `
-        UPDATE orders
-        SET status = ?, delivery_notes = COALESCE(?, delivery_notes), updated_at = CURRENT_TIMESTAMP
-            ${deliveryPartnerSet} ${
-        statusTimestampFragment ? `, ${statusTimestampFragment}` : ""
-    } ${paymentSet}
-        WHERE id = ?
-    `;
-    const primaryParams = [normalizedNextStatus, notes || null];
-    if (deliveryPartnerId !== undefined) {
-        primaryParams.push(deliveryPartnerId || null);
-    }
-    primaryParams.push(orderId);
+    const result = await withTransaction(async (connection) => {
+        const [rows] = await connection.execute(
+            `SELECT id, status FROM orders WHERE id = ? FOR UPDATE`,
+            [orderId]
+        );
 
-    const sqlFallback = `
-        UPDATE orders
-        SET status = ?, updated_at = CURRENT_TIMESTAMP
-            ${
-                deliveryPartnerId !== undefined
-                    ? ", delivery_partner_id = COALESCE(?, delivery_partner_id)"
-                    : ""
-            }
-            ${paymentSet}
-        WHERE id = ?
-    `;
-    const fallbackParams = [normalizedNextStatus];
-    if (deliveryPartnerId !== undefined) {
-        fallbackParams.push(deliveryPartnerId || null);
-    }
-    fallbackParams.push(orderId);
+        if (!rows.length) {
+            throw new AppError(404, "Order not found");
+        }
 
-    try {
-        await query(sqlPrimary, primaryParams);
-    } catch {
-        // Legacy schemas may miss delivery_notes or timestamp columns.
+        const lockedCurrentStatus = normalizeOrderStatusInput(rows[0].status);
+        const expectedStatus = currentStatus
+            ? normalizeOrderStatusInput(currentStatus)
+            : lockedCurrentStatus;
+
+        if (lockedCurrentStatus !== expectedStatus) {
+            throw new AppError(
+                409,
+                `Order status changed from ${expectedStatus} to ${lockedCurrentStatus}. Please refresh and retry.`
+            );
+        }
+
+        if (lockedCurrentStatus === normalizedNextStatus) {
+            return { changed: false, currentStatus: lockedCurrentStatus };
+        }
+
+        if (!canTransitionOrderStatus(lockedCurrentStatus, normalizedNextStatus)) {
+            throw new AppError(
+                400,
+                `Invalid order status transition from ${lockedCurrentStatus} to ${normalizedNextStatus}`
+            );
+        }
+
+        const statusTimestampFragment =
+            statusTimestampFragments[normalizedNextStatus] || "";
+        const paymentSet =
+            normalizedNextStatus === ORDER_STATUS.DELIVERED
+                ? `, payment_status = CASE WHEN payment_method = 'cash' THEN 'completed' ELSE payment_status END`
+                : "";
+        const deliveryPartnerSet =
+            deliveryPartnerId !== undefined
+                ? ", delivery_partner_id = COALESCE(?, delivery_partner_id)"
+                : "";
+
+        const sqlPrimary = `
+            UPDATE orders
+            SET status = ?, delivery_notes = COALESCE(?, delivery_notes), updated_at = CURRENT_TIMESTAMP
+                ${deliveryPartnerSet} ${
+            statusTimestampFragment ? `, ${statusTimestampFragment}` : ""
+        } ${paymentSet}
+            WHERE id = ?
+        `;
+        const primaryParams = [normalizedNextStatus, notes || null];
+        if (deliveryPartnerId !== undefined) {
+            primaryParams.push(deliveryPartnerId || null);
+        }
+        primaryParams.push(orderId);
+
+        const sqlFallback = `
+            UPDATE orders
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+                ${
+                    deliveryPartnerId !== undefined
+                        ? ", delivery_partner_id = COALESCE(?, delivery_partner_id)"
+                        : ""
+                }
+                ${paymentSet}
+            WHERE id = ?
+        `;
+        const fallbackParams = [normalizedNextStatus];
+        if (deliveryPartnerId !== undefined) {
+            fallbackParams.push(deliveryPartnerId || null);
+        }
+        fallbackParams.push(orderId);
+
         try {
-            await query(sqlFallback, fallbackParams);
+            await connection.execute(sqlPrimary, primaryParams);
         } catch {
-            // Last fallback for very old schemas that may not have updated_at.
-            await query(`UPDATE orders SET status = ? WHERE id = ?`, [
-                normalizedNextStatus,
-                orderId,
-            ]);
+            try {
+                await connection.execute(sqlFallback, fallbackParams);
+            } catch {
+                await connection.execute(
+                    `UPDATE orders SET status = ? WHERE id = ?`,
+                    [normalizedNextStatus, orderId]
+                );
+            }
         }
-    }
-    await insertOrderStatusLog({
-        orderId,
-        currentStatus,
-        nextStatus: normalizedNextStatus,
-        actorId,
-        actorRole,
-        notes,
-    });
-    await invalidateOrderCache(orderId);
 
-    if (normalizedNextStatus === ORDER_STATUS.DELIVERED) {
-        try {
-            await finalizeDeliveredOrderFinancials({ orderId });
-        } catch (error) {
-            logger.error("Delivered order financial finalization failed", {
-                orderId,
-                error: error?.message,
-            });
+        await insertOrderStatusLog({
+            orderId,
+            currentStatus: lockedCurrentStatus,
+            nextStatus: normalizedNextStatus,
+            actorId,
+            actorRole,
+            notes,
+            connection,
+        });
+
+        return { changed: true, currentStatus: lockedCurrentStatus };
+    });
+
+    if (result.changed) {
+        await invalidateOrderCache(orderId);
+
+        if (normalizedNextStatus === ORDER_STATUS.DELIVERED) {
+            try {
+                await finalizeDeliveredOrderFinancials({ orderId });
+            } catch (error) {
+                logger.error("Delivered order financial finalization failed", {
+                    orderId,
+                    error: error?.message,
+                });
+            }
         }
     }
+
+    return result;
 };
 
 export const cancelOrder = async ({

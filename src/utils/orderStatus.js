@@ -30,6 +30,41 @@ export const PERSISTED_ORDER_STATUS = {
     REFUNDED: "refunded",
 };
 
+export const ORDER_TERMINAL_STATUSES = new Set([
+    PERSISTED_ORDER_STATUS.DELIVERED,
+    PERSISTED_ORDER_STATUS.CANCELLED,
+    PERSISTED_ORDER_STATUS.REFUNDED,
+]);
+
+export const ORDER_STATUS_TRANSITIONS = {
+    [PERSISTED_ORDER_STATUS.PLACED]: [
+        PERSISTED_ORDER_STATUS.CONFIRMED,
+        PERSISTED_ORDER_STATUS.CANCELLED,
+    ],
+    [PERSISTED_ORDER_STATUS.CONFIRMED]: [
+        PERSISTED_ORDER_STATUS.PREPARING,
+        PERSISTED_ORDER_STATUS.CANCELLED,
+    ],
+    [PERSISTED_ORDER_STATUS.PREPARING]: [
+        PERSISTED_ORDER_STATUS.PREPARED,
+        PERSISTED_ORDER_STATUS.READY,
+        PERSISTED_ORDER_STATUS.CANCELLED,
+    ],
+    [PERSISTED_ORDER_STATUS.PREPARED]: [
+        PERSISTED_ORDER_STATUS.READY,
+        PERSISTED_ORDER_STATUS.CANCELLED,
+    ],
+    [PERSISTED_ORDER_STATUS.READY]: [
+        PERSISTED_ORDER_STATUS.PICKED_UP,
+        PERSISTED_ORDER_STATUS.CANCELLED,
+    ],
+    [PERSISTED_ORDER_STATUS.PICKED_UP]: [PERSISTED_ORDER_STATUS.ON_THE_WAY],
+    [PERSISTED_ORDER_STATUS.ON_THE_WAY]: [PERSISTED_ORDER_STATUS.DELIVERED],
+    [PERSISTED_ORDER_STATUS.DELIVERED]: [PERSISTED_ORDER_STATUS.REFUNDED],
+    [PERSISTED_ORDER_STATUS.CANCELLED]: [PERSISTED_ORDER_STATUS.REFUNDED],
+    [PERSISTED_ORDER_STATUS.REFUNDED]: [],
+};
+
 const inputToPersistedStatus = {
     pending: PERSISTED_ORDER_STATUS.PLACED,
     placed: PERSISTED_ORDER_STATUS.PLACED,
@@ -75,6 +110,21 @@ export const normalizeOrderStatusInput = (value) => {
     return inputToPersistedStatus[normalized] || normalized;
 };
 
+export const canTransitionOrderStatus = (currentStatus, nextStatus) => {
+    const current = normalizeOrderStatusInput(currentStatus);
+    const next = normalizeOrderStatusInput(nextStatus);
+
+    if (!current || !next) return false;
+    if (current === next) return true;
+
+    return ORDER_STATUS_TRANSITIONS[current]?.includes(next) || false;
+};
+
+export const getAllowedNextOrderStatuses = (currentStatus) => {
+    const current = normalizeOrderStatusInput(currentStatus);
+    return ORDER_STATUS_TRANSITIONS[current] || [];
+};
+
 export const toProductOrderStatus = (value) => {
     const normalized = normalizeToken(value);
 
@@ -87,9 +137,9 @@ export const withProductOrderStatus = (record) => {
     return {
         ...record,
         product_status: toProductOrderStatus(record.status),
+        allowed_next_statuses: getAllowedNextOrderStatuses(record.status),
     };
 };
 
 export const withProductOrderStatusList = (records) =>
     Array.isArray(records) ? records.map(withProductOrderStatus) : records;
-

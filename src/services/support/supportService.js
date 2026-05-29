@@ -16,6 +16,12 @@ import {
     updateSupportTicket,
 } from "../../models/supportModel.js";
 import { AppError } from "../../utils/http.js";
+import {
+    createNotification,
+    emitRealtimeEvent,
+    notifyAdmins,
+    notifyOrderStakeholders,
+} from "../notificationService.js";
 
 const SUPPORT_CATEGORIES = new Set([
     "missing_item",
@@ -104,7 +110,21 @@ export const createCustomerTicket = async ({
         priority: normalizePriority(priority),
     });
 
-    return getSupportTicketWithMessages(ticketId);
+    const ticket = await getSupportTicketWithMessages(ticketId);
+
+    await notifyAdmins({
+        title: "New support ticket",
+        message: `${ticket.subject} was opened by a customer.`,
+        type: "support_ticket",
+        data: { ticketId, orderId: order?.id || null },
+    });
+    emitRealtimeEvent({
+        room: "admin:support",
+        eventName: "support:ticket-created",
+        payload: ticket,
+    });
+
+    return ticket;
 };
 
 export const listCustomerTickets = ({ customerId, status }) =>
@@ -157,7 +177,20 @@ export const replyToCustomerTicket = async ({
                 : ticket.status,
     });
 
-    return getCustomerTicket({ customerId, ticketId });
+    const updated = await getCustomerTicket({ customerId, ticketId });
+    await notifyAdmins({
+        title: "Customer replied",
+        message: `A customer replied to ticket #${ticketId}.`,
+        type: "support_reply",
+        data: { ticketId, orderId: ticket.order_id || null },
+    });
+    emitRealtimeEvent({
+        room: "admin:support",
+        eventName: "support:message-created",
+        payload: { ticketId, senderRole: "customer" },
+    });
+
+    return updated;
 };
 
 export const requestCustomerRefund = async ({
@@ -216,7 +249,20 @@ export const requestCustomerRefund = async ({
         paymentReference: order.payment_reference || order.payment_id || null,
     });
 
-    return getRefundRequestById(refundId);
+    const refund = await getRefundRequestById(refundId);
+    await notifyAdmins({
+        title: "Refund requested",
+        message: `Refund requested for order ${order.order_number || order.id}.`,
+        type: "refund_request",
+        data: { refundId, orderId: order.id, amount: safeAmount },
+    });
+    emitRealtimeEvent({
+        room: "admin:refunds",
+        eventName: "refund:created",
+        payload: refund,
+    });
+
+    return refund;
 };
 
 export const listCustomerRefunds = ({ customerId, status }) =>
@@ -353,7 +399,30 @@ export const replyToAdminTicket = async ({
         await updateSupportTicket({ ticketId, status: "in_progress" });
     }
 
-    return getAdminTicket(ticketId);
+    const updated = await getAdminTicket(ticketId);
+
+    if (!isInternal && ticket.user_id) {
+        await createNotification({
+            userId: ticket.user_id,
+            title: "Support replied",
+            message: `Support replied to ticket #${ticketId}.`,
+            type: "support_reply",
+            data: { ticketId, orderId: ticket.order_id || null },
+        });
+        emitRealtimeEvent({
+            room: `user:${ticket.user_id}`,
+            eventName: "support:message-created",
+            payload: { ticketId, senderRole: "admin" },
+        });
+    }
+
+    emitRealtimeEvent({
+        room: "admin:support",
+        eventName: "support:message-created",
+        payload: { ticketId, senderRole: "admin", isInternal: Boolean(isInternal) },
+    });
+
+    return updated;
 };
 
 export const updateAdminTicket = async ({
@@ -387,7 +456,22 @@ export const updateAdminTicket = async ({
         resolution,
     });
 
-    return getAdminTicket(ticketId);
+    const updated = await getAdminTicket(ticketId);
+
+    await createNotification({
+        userId: ticket.user_id,
+        title: "Support ticket updated",
+        message: `Ticket #${ticketId} is now ${updated.status}.`,
+        type: "support_ticket",
+        data: { ticketId, status: updated.status, orderId: ticket.order_id || null },
+    });
+    emitRealtimeEvent({
+        room: "admin:support",
+        eventName: "support:ticket-updated",
+        payload: updated,
+    });
+
+    return updated;
 };
 
 export const listAdminRefunds = (filters) => listRefundRequests(filters);
@@ -430,6 +514,7 @@ export const updateAdminRefund = async ({
 
         await updateOrderStatus({
             orderId: refund.order_id,
+            currentStatus: refund.order_status,
             nextStatus: "refunded",
             actorId: adminId,
             actorRole: "admin",
@@ -437,5 +522,36 @@ export const updateAdminRefund = async ({
         });
     }
 
-    return getRefundRequestById(refundId);
+    const updated = await getRefundRequestById(refundId);
+    const order = await getOrderById(refund.order_id);
+
+    await createNotification({
+        userId: refund.customer_id,
+        title: "Refund updated",
+        message: `Your refund request is ${status}.`,
+        type: "refund_update",
+        data: {
+            refundId,
+            orderId: refund.order_id,
+            status,
+            amount: refund.amount,
+        },
+    });
+    await notifyOrderStakeholders({
+        order,
+        title: "Refund updated",
+        message: `Refund for order ${
+            order?.order_number || refund.order_id
+        } is ${status}.`,
+        type: "refund_update",
+        data: { refundId, status, amount: refund.amount },
+        includeAdmins: false,
+    });
+    emitRealtimeEvent({
+        room: "admin:refunds",
+        eventName: "refund:updated",
+        payload: updated,
+    });
+
+    return updated;
 };

@@ -7,6 +7,7 @@ import {
     getCustomerCheckoutSummary,
     getOrderById,
     getOrderItems,
+    findOrderByPaymentReference,
     saveOrderPaymentRecord,
     updateOrderPaymentSnapshot,
 } from "../../models/orderModel.js";
@@ -30,6 +31,7 @@ export const processMockPaymentAndPlaceOrder = async ({
     customerNotes,
     paymentMethod,
     paymentData,
+    idempotencyKey,
 }) => {
     if (!addressId) {
         throw new AppError(400, "Address is required");
@@ -46,6 +48,9 @@ export const processMockPaymentAndPlaceOrder = async ({
     const normalized = validatePaymentData(method, paymentData);
 
     const transactionId = buildMockTransactionId(method);
+    const paymentReference = idempotencyKey
+        ? `checkout:${userId}:${String(idempotencyKey).trim()}`
+        : transactionId;
 
     const isCashOnDelivery = method === "cash";
 
@@ -57,10 +62,25 @@ export const processMockPaymentAndPlaceOrder = async ({
         ? "cash_on_delivery"
         : "mock_gateway";
 
-    const duplicate = await findOrderByPaymentId(transactionId);
+    const duplicate = idempotencyKey
+        ? await findOrderByPaymentReference(paymentReference)
+        : await findOrderByPaymentId(transactionId);
 
     if (duplicate?.id) {
-        throw new AppError(409, "Duplicate mock transaction detected");
+        const order = await getOrderById(duplicate.id);
+        const items = await getOrderItems(duplicate.id);
+
+        return {
+            ...order,
+            items,
+            payment: {
+                provider: order?.payment_provider || paymentProvider,
+                transactionId: order?.payment_id || transactionId,
+                method,
+                status: isCashOnDelivery ? "pending" : "captured",
+                idempotentReplay: true,
+            },
+        };
     }
 
     let checkoutSummary;
@@ -88,7 +108,7 @@ export const processMockPaymentAndPlaceOrder = async ({
 
             paymentStatus,
 
-            paymentReference: transactionId,
+            paymentReference,
         });
     } catch (error) {
         throw new AppError(400, error.message);

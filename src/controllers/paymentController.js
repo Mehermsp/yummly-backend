@@ -28,6 +28,9 @@ export const completeMockPaymentAndPlaceOrder = asyncHandler(
             userId: req.user.id,
 
             ...req.body,
+
+            idempotencyKey:
+                req.body.idempotencyKey || req.headers["idempotency-key"],
         });
 
         sendSuccess(

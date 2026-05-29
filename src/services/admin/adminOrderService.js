@@ -4,6 +4,8 @@ import {
     withProductOrderStatus,
     withProductOrderStatusList,
 } from "../../utils/orderStatus.js";
+import { getOrderById as getLiveOrderById } from "../../models/orderModel.js";
+import { notifyOrderStakeholders } from "../notificationService.js";
 
 export const getOrders = async (filters = {}) => {
     const { status, limit } = filters;
@@ -205,8 +207,8 @@ export const assignDeliveryPartner = async ({
     orderId,
     deliveryPartnerId,
     adminId,
-}) =>
-    withTransaction(async (connection) => {
+}) => {
+    const result = await withTransaction(async (connection) => {
         const [orderRows] = await connection.execute(
             `
             SELECT id, status, delivery_partner_id
@@ -329,3 +331,21 @@ export const assignDeliveryPartner = async ({
             message: "Delivery partner assigned successfully",
         };
     });
+
+    const order = await getLiveOrderById(orderId);
+    await notifyOrderStakeholders({
+        order,
+        title: "Delivery partner assigned",
+        message: `Delivery partner assigned for order ${
+            order?.order_number || orderId
+        }.`,
+        type: "delivery_assignment",
+        data: {
+            assignmentStatus: "assigned",
+            deliveryPartnerId,
+            actorRole: "admin",
+        },
+    });
+
+    return result;
+};

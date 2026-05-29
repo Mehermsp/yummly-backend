@@ -9,32 +9,11 @@ import {
 } from "../../models/orderModel.js";
 
 import { getRestaurantByOwnerId } from "../../models/restaurantModel.js";
-import { normalizeOrderStatusInput } from "../../utils/orderStatus.js";
+import {
+    canTransitionOrderStatus,
+    normalizeOrderStatusInput,
+} from "../../utils/orderStatus.js";
 import { notifyOrderStakeholders } from "../notificationService.js";
-
-const validateRestaurantStatusTransition = (currentStatus, nextStatus) => {
-    const allowedTransitions = {
-        placed: ["confirmed", "cancelled"],
-
-        confirmed: ["preparing", "cancelled"],
-
-        preparing: ["prepared", "ready", "cancelled"],
-
-        prepared: ["ready", "cancelled"],
-
-        ready: ["cancelled"],
-
-        picked_up: [],
-
-        on_the_way: [],
-
-        delivered: [],
-
-        cancelled: [],
-    };
-
-    return allowedTransitions[currentStatus]?.includes(nextStatus);
-};
 
 export const getRestaurantOrders = async ({ ownerId, status }) => {
     const restaurant = await getRestaurantByOwnerId(ownerId);
@@ -72,10 +51,7 @@ export const updateRestaurantOrderStatus = async ({
 
     const currentStatus = normalizeOrderStatusInput(order.status);
 
-    const valid = validateRestaurantStatusTransition(
-        currentStatus,
-        normalizedStatus
-    );
+    const valid = canTransitionOrderStatus(currentStatus, normalizedStatus);
 
     if (!valid) {
         throw new AppError(400, "Invalid status transition for restaurant");

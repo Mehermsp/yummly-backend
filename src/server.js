@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { initializeDatabase } from "./config/db.js";
 import { logger } from "./utils/logger.js";
 import { createSocketServer } from "./socket.js";
+import { startNotificationOutboxWorker } from "./services/notifications/outboxWorker.js";
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ const startServer = async () => {
         const app = createApp();
         const server = http.createServer(app);
         createSocketServer(server);
+        startNotificationOutboxWorker();
 
         const PORT = process.env.PORT || 5000;
         server.listen(PORT, () => {

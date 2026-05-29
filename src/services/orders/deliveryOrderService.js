@@ -105,10 +105,14 @@ export const pickupOrder = async ({ orderId, deliveryPartnerId }) => {
         status: "picked_up",
     });
 
+    const order = await getOrderById(orderId);
+
     await updateOrderStatus({
         orderId,
 
-        nextStatus: "on_the_way",
+        currentStatus: order?.status,
+
+        nextStatus: "picked_up",
 
         actorId: deliveryPartnerId,
 
@@ -121,10 +125,10 @@ export const pickupOrder = async ({ orderId, deliveryPartnerId }) => {
         title: "Order picked up",
         message: `Order ${
             updated?.order_number || updated?.id
-        } is on the way.`,
+        } was picked up by the delivery partner.`,
         type: "order_status",
         data: {
-            status: "on_the_way",
+            status: "picked_up",
             actorRole: "delivery_partner",
         },
     });
@@ -150,8 +154,28 @@ export const deliverOrder = async ({ orderId, deliveryPartnerId }) => {
         status: "delivered",
     });
 
+    const currentOrder = await getOrderById(orderId);
+
+    if (currentOrder?.status === "picked_up") {
+        await updateOrderStatus({
+            orderId,
+
+            currentStatus: currentOrder.status,
+
+            nextStatus: "on_the_way",
+
+            actorId: deliveryPartnerId,
+
+            actorRole: "delivery_partner",
+        });
+    }
+
+    const orderForDelivery = await getOrderById(orderId);
+
     await updateOrderStatus({
         orderId,
+
+        currentStatus: orderForDelivery?.status,
 
         nextStatus: "delivered",
 
