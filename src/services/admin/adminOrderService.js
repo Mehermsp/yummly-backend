@@ -146,6 +146,83 @@ export const getOrderById = async (id) => {
     const order = withProductOrderStatus(orders[0]);
 
     order.items = items;
+    order.timeline = await query(
+        `
+        SELECT *
+        FROM order_status_logs
+        WHERE order_id = ?
+        ORDER BY COALESCE(created_at, updated_at) ASC, id ASC
+        `,
+        [id]
+    ).catch(() => []);
+    order.payments = await query(
+        `
+        SELECT *
+        FROM payments
+        WHERE order_id = ?
+        ORDER BY paid_at DESC, created_at DESC
+        `,
+        [id]
+    ).catch(() => []);
+    order.payment_records = await query(
+        `
+        SELECT *
+        FROM order_payments
+        WHERE order_id = ?
+        ORDER BY created_at DESC, id DESC
+        `,
+        [id]
+    ).catch(() => []);
+    order.refunds = await query(
+        `
+        SELECT rr.*, u.name AS customer_name
+        FROM refund_requests rr
+        LEFT JOIN users u ON u.id = rr.customer_id
+        WHERE rr.order_id = ?
+        ORDER BY rr.requested_at DESC, rr.id DESC
+        `,
+        [id]
+    ).catch(() => []);
+    order.delivery_assignments = await query(
+        `
+        SELECT da.*, u.name AS delivery_partner_name, u.phone AS delivery_partner_phone
+        FROM delivery_assignments da
+        LEFT JOIN users u ON u.id = da.delivery_partner_id
+        WHERE da.order_id = ?
+        ORDER BY da.assigned_at DESC, da.id DESC
+        `,
+        [id]
+    ).catch(() => []);
+    order.support_tickets = await query(
+        `
+        SELECT id, ticket_number, category, subject, priority, status, assigned_admin_id, created_at, updated_at
+        FROM support_tickets
+        WHERE order_id = ?
+        ORDER BY updated_at DESC
+        `,
+        [id]
+    ).catch(() => []);
+    order.financials = await query(
+        `
+        SELECT *
+        FROM order_financials
+        WHERE order_id = ?
+        LIMIT 1
+        `,
+        [id]
+    )
+        .then((rows) => rows[0] || null)
+        .catch(() => null);
+    order.financial_logs = await query(
+        `
+        SELECT *
+        FROM financial_transaction_logs
+        WHERE order_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 50
+        `,
+        [id]
+    ).catch(() => []);
 
     order.delivery_address = [
         order.door_no,

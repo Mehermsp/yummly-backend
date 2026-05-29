@@ -16,7 +16,10 @@ import { submitApplication } from "../controllers/restaurant/restaurantApplicati
 // DASHBOARD CONTROLLER
 // =====================================================
 
-import { getPartnerDashboard } from "../controllers/restaurant/restaurantDashboardController.js";
+import {
+    getPartnerAnalytics,
+    getPartnerDashboard,
+} from "../controllers/restaurant/restaurantDashboardController.js";
 
 // =====================================================
 // PROFILE CONTROLLER
@@ -54,6 +57,7 @@ router.use(authenticate, authorize(ROLES.RESTAURANT_PARTNER));
 // =====================================================
 
 router.get("/dashboard", getPartnerDashboard);
+router.get("/analytics", getPartnerAnalytics);
 
 // =====================================================
 // PROFILE

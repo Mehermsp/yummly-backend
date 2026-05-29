@@ -477,6 +477,206 @@ COALESCE(SUM(CASE WHEN status IN ('placed', 'confirmed', 'preparing', 'ready', '
     return { metrics, recentOrders };
 };
 
+export const getRestaurantAnalytics = async ({
+    restaurantId,
+    days = 30,
+} = {}) => {
+    const safeDays = Math.min(Math.max(Number(days) || 30, 7), 365);
+
+    const [summary] = await query(
+        `
+        SELECT
+            COUNT(*) AS total_orders,
+            COUNT(CASE WHEN status = 'delivered' THEN 1 END) AS delivered_orders,
+            COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled_orders,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total ELSE 0 END), 0) AS delivered_revenue,
+            COALESCE(AVG(CASE WHEN status = 'delivered' THEN total END), 0) AS average_order_value,
+            COUNT(DISTINCT user_id) AS unique_customers,
+            COUNT(*) - COUNT(DISTINCT user_id) AS repeat_order_count
+        FROM orders
+        WHERE restaurant_id = ?
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        `,
+        [restaurantId, safeDays]
+    );
+
+    const dailyRevenue = await query(
+        `
+        SELECT
+            DATE(created_at) AS date,
+            COUNT(*) AS orders,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total ELSE 0 END), 0) AS revenue
+        FROM orders
+        WHERE restaurant_id = ?
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        GROUP BY DATE(created_at)
+        ORDER BY date ASC
+        `,
+        [restaurantId, safeDays]
+    );
+
+    const weeklyRevenue = await query(
+        `
+        SELECT
+            YEARWEEK(created_at, 1) AS week,
+            MIN(DATE(created_at)) AS week_start,
+            COUNT(*) AS orders,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total ELSE 0 END), 0) AS revenue
+        FROM orders
+        WHERE restaurant_id = ?
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        GROUP BY YEARWEEK(created_at, 1)
+        ORDER BY week_start ASC
+        `,
+        [restaurantId, safeDays]
+    );
+
+    const monthlyRevenue = await query(
+        `
+        SELECT
+            DATE_FORMAT(created_at, '%Y-%m') AS month,
+            COUNT(*) AS orders,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total ELSE 0 END), 0) AS revenue
+        FROM orders
+        WHERE restaurant_id = ?
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+        ORDER BY month ASC
+        `,
+        [restaurantId, safeDays]
+    );
+
+    const peakHours = await query(
+        `
+        SELECT
+            HOUR(created_at) AS hour,
+            COUNT(*) AS orders,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total ELSE 0 END), 0) AS revenue
+        FROM orders
+        WHERE restaurant_id = ?
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        GROUP BY HOUR(created_at)
+        ORDER BY orders DESC, hour ASC
+        `,
+        [restaurantId, safeDays]
+    );
+
+    const itemPerformance = await query(
+        `
+        SELECT
+            mi.id,
+            mi.name,
+            mi.category,
+            COUNT(DISTINCT oi.order_id) AS order_count,
+            COALESCE(SUM(COALESCE(oi.qty, oi.quantity, 0)), 0) AS quantity_sold,
+            COALESCE(SUM(oi.subtotal), 0) AS revenue,
+            COALESCE(mi.is_available, 1) AS is_available
+        FROM menu_items mi
+        LEFT JOIN order_items oi ON oi.menu_id = mi.id
+        LEFT JOIN orders o ON o.id = oi.order_id
+            AND o.restaurant_id = mi.restaurant_id
+            AND o.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        WHERE mi.restaurant_id = ?
+        GROUP BY mi.id, mi.name, mi.category, mi.is_available
+        ORDER BY quantity_sold DESC, revenue DESC
+        `,
+        [safeDays, restaurantId]
+    );
+
+    const cancellationAnalytics = await query(
+        `
+        SELECT
+            status,
+            COUNT(*) AS orders,
+            ROUND((COUNT(*) * 100.0) / NULLIF((
+                SELECT COUNT(*)
+                FROM orders
+                WHERE restaurant_id = ?
+                  AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+            ), 0), 2) AS percentage
+        FROM orders
+        WHERE restaurant_id = ?
+          AND status IN ('cancelled', 'refunded')
+          AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        GROUP BY status
+        `,
+        [restaurantId, safeDays, restaurantId, safeDays]
+    );
+
+    let refundAnalytics = [];
+    try {
+        refundAnalytics = await query(
+            `
+            SELECT
+                rr.status,
+                COUNT(*) AS refunds,
+                COALESCE(SUM(rr.amount), 0) AS amount
+            FROM refund_requests rr
+            INNER JOIN orders o ON o.id = rr.order_id
+            WHERE o.restaurant_id = ?
+              AND rr.requested_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+            GROUP BY rr.status
+            ORDER BY amount DESC
+            `,
+            [restaurantId, safeDays]
+        );
+    } catch {
+        refundAnalytics = [];
+    }
+
+    const categoryTrends = await query(
+        `
+        SELECT
+            COALESCE(mi.category, 'uncategorized') AS category,
+            COUNT(DISTINCT oi.order_id) AS orders,
+            COALESCE(SUM(COALESCE(oi.qty, oi.quantity, 0)), 0) AS quantity_sold,
+            COALESCE(SUM(oi.subtotal), 0) AS revenue
+        FROM menu_items mi
+        LEFT JOIN order_items oi ON oi.menu_id = mi.id
+        LEFT JOIN orders o ON o.id = oi.order_id
+            AND o.restaurant_id = mi.restaurant_id
+            AND o.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+        WHERE mi.restaurant_id = ?
+        GROUP BY COALESCE(mi.category, 'uncategorized')
+        ORDER BY revenue DESC
+        `,
+        [safeDays, restaurantId]
+    );
+
+    return {
+        period_days: safeDays,
+        summary: {
+            total_orders: Number(summary?.total_orders || 0),
+            delivered_orders: Number(summary?.delivered_orders || 0),
+            cancelled_orders: Number(summary?.cancelled_orders || 0),
+            delivered_revenue: Number(summary?.delivered_revenue || 0),
+            average_order_value: Number(summary?.average_order_value || 0),
+            unique_customers: Number(summary?.unique_customers || 0),
+            repeat_order_count: Number(summary?.repeat_order_count || 0),
+            cancellation_rate:
+                Number(summary?.total_orders || 0) > 0
+                    ? Number(
+                          (
+                              (Number(summary?.cancelled_orders || 0) /
+                                  Number(summary?.total_orders || 1)) *
+                              100
+                          ).toFixed(2)
+                      )
+                    : 0,
+        },
+        daily_revenue: dailyRevenue,
+        weekly_revenue: weeklyRevenue,
+        monthly_revenue: monthlyRevenue,
+        peak_hours: peakHours,
+        best_selling_items: itemPerformance.slice(0, 10),
+        worst_performing_items: itemPerformance.slice(-10).reverse(),
+        item_conversion: itemPerformance,
+        cancellation_analytics: cancellationAnalytics,
+        refund_analytics: refundAnalytics,
+        category_trends: categoryTrends,
+    };
+};
+
 export const listRestaurantOrders = async (restaurantId, status) => {
     return query(
         `

@@ -1,4 +1,9 @@
 import { query, withTransaction } from "../../config/db.js";
+import {
+    createNotification,
+    emitRealtimeEvent,
+    notifyAdmins,
+} from "../notificationService.js";
 
 const isUnknownColumnError = (error) =>
     error?.code === "ER_BAD_FIELD_ERROR" ||
@@ -186,8 +191,8 @@ export const getApplicationById = async (id) => {
     }
 };
 
-export const approveApplication = async ({ applicationId, reviewedBy }) =>
-    withTransaction(async (connection) => {
+export const approveApplication = async ({ applicationId, reviewedBy }) => {
+    const result = await withTransaction(async (connection) => {
         const [applications] = await connection.execute(
             `
             SELECT *
@@ -215,7 +220,7 @@ export const approveApplication = async ({ applicationId, reviewedBy }) =>
         );
 
         try {
-            await connection.execute(
+            const [restaurantResult] = await connection.execute(
                 `
                 INSERT INTO restaurants (
                     user_id,
@@ -269,7 +274,7 @@ export const approveApplication = async ({ applicationId, reviewedBy }) =>
                 throw error;
             }
 
-            await connection.execute(
+            const [restaurantResult] = await connection.execute(
                 `
                 INSERT INTO restaurants (
                     user_id,
@@ -323,14 +328,47 @@ export const approveApplication = async ({ applicationId, reviewedBy }) =>
         return {
             success: true,
             message: "Application approved and restaurant created successfully",
+            ownerId: app.owner_id,
+            restaurantName: app.restaurant_name,
+            restaurantId: restaurantResult?.insertId || null,
         };
     });
+
+    if (result.ownerId) {
+        await createNotification({
+            userId: result.ownerId,
+            title: "Restaurant approved",
+            message: `${result.restaurantName || "Your restaurant"} is approved and live.`,
+            type: "restaurant_approval",
+            data: {
+                applicationId,
+                restaurantId: result.restaurantId,
+                status: "approved",
+            },
+        });
+    }
+    await notifyAdmins({
+        title: "Restaurant application approved",
+        message: `${result.restaurantName || "Restaurant"} was approved.`,
+        type: "restaurant_application",
+        data: { applicationId, restaurantId: result.restaurantId },
+    });
+    emitRealtimeEvent({
+        room: "admin:restaurants",
+        eventName: "restaurant:application-reviewed",
+        payload: result,
+    });
+
+    return result;
+};
 
 export const rejectApplication = async ({
     applicationId,
     rejectionReason,
     reviewedBy,
 }) => {
+    const application = await getApplicationById(applicationId);
+
     await query(
         `
         UPDATE restaurant_applications
@@ -343,10 +381,29 @@ export const rejectApplication = async ({
         [rejectionReason, reviewedBy, applicationId]
     );
 
-    return {
+    const result = {
         success: true,
         message: "Application rejected successfully",
     };
+
+    if (application?.user_id || application?.owner_id) {
+        await createNotification({
+            userId: application.user_id || application.owner_id,
+            title: "Restaurant application rejected",
+            message:
+                rejectionReason ||
+                "Your restaurant application needs changes before approval.",
+            type: "restaurant_approval",
+            data: { applicationId, status: "rejected" },
+        });
+    }
+    emitRealtimeEvent({
+        room: "admin:restaurants",
+        eventName: "restaurant:application-reviewed",
+        payload: { applicationId, status: "rejected" },
+    });
+
+    return result;
 };
 
 // ==============================
@@ -410,6 +467,31 @@ export const updateRestaurantStatus = async (id, status) => {
         `,
         [isActive, id]
     );
+
+    const restaurant = await getRestaurantById(id);
+
+    if (restaurant?.owner_id || restaurant?.user_id) {
+        await createNotification({
+            userId: restaurant.owner_id || restaurant.user_id,
+            title:
+                status === "active"
+                    ? "Restaurant activated"
+                    : "Restaurant status changed",
+            message: `${restaurant.name || "Your restaurant"} is now ${status}.`,
+            type: status === "suspended" ? "restaurant_suspension" : "restaurant_status",
+            data: { restaurantId: id, status },
+        });
+    }
+    emitRealtimeEvent({
+        room: `restaurant:${id}`,
+        eventName: "restaurant:operations-updated",
+        payload: { restaurantId: id, status, isActive },
+    });
+    emitRealtimeEvent({
+        room: "admin:restaurants",
+        eventName: "restaurant:operations-updated",
+        payload: { restaurantId: id, status, isActive },
+    });
 
     return {
         success: true,
